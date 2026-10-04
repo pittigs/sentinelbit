@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>sentinelbit Extension</title>
+  <style>
+    :root {
+      --bg-dark: #0b0f19;
+      --bg-card: #111827;
+      --bg-card-hover: #1f293d;
+      --border: #2d3748;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --accent-glow: rgba(59, 130, 246, 0.25);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { width: 360px; min-height: 460px; background-color: var(--bg-dark); color: var(--text); padding: 12px; font-size: 13px; user-select: none; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px; }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1rem; color: #60a5fa; }
+    .brand-icon { width: 22px; height: 22px; border-radius: 4px; object-fit: contain; }
+    .header-actions { display: flex; align-items: center; gap: 6px; }
+    .status-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500; }
+    .status-badge.offline { background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+
+    .btn-icon { background: #1f2937; border: 1px solid var(--border); color: var(--text-muted); width: 26px; height: 26px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; transition: all 0.2s; }
+    .btn-icon:hover { color: white; border-color: var(--accent); background: #374151; }
+    .btn-icon.spinning { animation: spin 0.8s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    /* Nav Tabs */
+    .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    .tab-btn { flex: 1; padding: 6px 10px; font-size: 0.8rem; font-weight: 600; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer; text-align: center; transition: all 0.2s; }
+    .tab-btn:hover { color: var(--text); background: #1f2937; }
+    .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+    /* Inputs */
+    .search-container { position: relative; margin-bottom: 10px; }
+    .search-input { width: 100%; background: #1f2937; border: 1px solid var(--border); color: white; padding: 8px 10px; border-radius: 6px; font-size: 0.85rem; outline: none; }
+    .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+    .search-input.has-icon { padding-left: 28px; }
+    .search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text-dim); }
+
+    /* Domain Section Title */
+    .domain-bar { display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600; }
+    .domain-toggle-link { color: #60a5fa; cursor: pointer; text-transform: none; font-size: 0.75rem; text-decoration: none; }
+    .domain-toggle-link:hover { text-decoration: underline; }
+
+    /* Item Cards */
+    .items-container { max-height: 290px; overflow-y: auto; padding-right: 2px; }
+    .items-container::-webkit-scrollbar { width: 4px; }
+    .items-container::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+
+    .item-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; transition: border-color 0.2s, background 0.2s; }
+    .item-card:hover { border-color: #4b5563; background: var(--bg-card-hover); }
+
+    .item-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+    .item-title { font-weight: 600; font-size: 0.88rem; color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+    .item-user { font-size: 0.76rem; color: var(--text-muted); margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .actions { display: flex; gap: 6px; }
+    .btn { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; font-weight: 600; cursor: pointer; flex: 1; text-align: center; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:active { transform: scale(0.98); }
+    .btn-secondary { background: #1f2937; border: 1px solid var(--border); color: #e5e7eb; flex: initial; }
+    .btn-secondary:hover { background: #374151; border-color: #4b5563; }
+    .btn-danger { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.3); color: white; }
+
+    /* Generator Section */
+    .generator-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .pwd-display { background: #000; border: 1px solid var(--border); padding: 10px; border-radius: 6px; font-family: monospace; font-size: 1rem; color: #34d399; word-break: break-all; text-align: center; margin-bottom: 12px; letter-spacing: 1px; user-select: all; }
+    .gen-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 0.82rem; }
+    .gen-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; font-size: 0.78rem; color: #d1d5db; }
+    .gen-options label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+    /* Unlock Form */
+    .unlock-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 14px; text-align: center; }
+
+    /* Footer */
+    .footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-dim); }
+    .footer a { color: #60a5fa; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+    .footer a:hover { text-decoration: underline; }
+
+    /* Toast */
+    .toast-popup { position: fixed; bottom: 42px; left: 50%; transform: translateX(-50%); background: #1f2937; color: white; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--accent); font-size: 0.75rem; box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none; opacity: 0; transition: opacity 0.2s ease; z-index: 100; text-align: center; white-space: nowrap; }
+    .toast-popup.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="brand">
+      <img src="icon48.png" alt="Logo" class="brand-icon">
+      sentinelbit
+    </div>
+    <div class="header-actions">
+      <span class="status-badge" id="server-status">Prüfe...</span>
+      <button class="btn-icon" id="btn-sync" title="Jetzt aus geöffnetem Web-Tresor synchronisieren">🔄</button>
+      <button class="btn-icon" id="btn-lock" title="Erweiterung sperren" style="display: none;">🔒</button>
+    </div>
+  </div>
+
+  <!-- VIEW A: UNLOCK FORM (when locked or empty) -->
+  <div id="view-unlock" style="display: none;">
+    <div class="unlock-card">
+      <div style="font-size: 1.8rem; margin-bottom: 6px;">🛡️</div>
+      <div style="font-weight: 700; font-size: 1rem; color: #60a5fa; margin-bottom: 4px;">Tresor verbinden</div>
+      <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">
+        Melde dich direkt an oder übernimm deine Logins aus dem geöffneten Web-Tresor.
+      </p>
+
+      <form id="popup-login-form">
+        <input type="text" id="popup-login-user" class="search-input" placeholder="Benutzername" required style="margin-bottom: 8px;">
+        <input type="password" id="popup-login-pass" class="search-input" placeholder="Master-Passwort" required style="margin-bottom: 8px;">
+        <div id="popup-login-totp-row" style="display: none; margin-bottom: 8px;">
+          <input type="text" id="popup-login-totp" class="search-input" placeholder="6-stelliger 2FA-Code (falls aktiv)">
+        </div>
+        <button type="submit" class="btn" id="btn-popup-login" style="width: 100%; padding: 8px; margin-bottom: 12px;">
+          🔓 Anmelden & Synchronisieren
+        </button>
+      </form>
+
+      <div style="border-top: 1px dashed var(--border); padding-top: 12px; margin-top: 4px; display: flex; flex-direction: column; gap: 8px;">
+        <button type="button" class="btn btn-secondary" id="btn-popup-tab-sync" style="width: 100%; font-size: 0.76rem; padding: 7px;">
+          🔄 Aus geöffnetem Web-Tab laden
+        </button>
+        <button type="button" class="btn btn-secondary" id="btn-open-web-vault" style="width: 100%; font-size: 0.76rem; padding: 7px;">
+          🌐 Web-Tresor im Browser öffnen
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW B: MAIN CONTENT (when unlocked) -->
+  <div id="view-main">
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-btn-logins">🔑 Zugänge</button>
+      <button class="tab-btn" id="tab-btn-generator">🎲 Generator</button>
+    </div>
+
+    <!-- View 1: Logins & Autofill -->
+    <div id="view-logins">
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="ext-search" class="search-input has-icon" placeholder="Passwörter durchsuchen...">
+      </div>
+
+      <div class="domain-bar">
+        <span id="domain-label">Gefundene Zugänge:</span>
+        <a href="#" class="domain-toggle-link" id="btn-toggle-all">Alle anzeigen</a>
+      </div>
+
+      <div class="items-container" id="items-list">
+        <!-- Populated dynamically via popup.js -->
+      </div>
+    </div>
+
+    <!-- View 2: Password Generator -->
+    <div id="view-generator" style="display: none;">
+      <div class="generator-card">
+        <div class="pwd-display" id="gen-pwd-output">••••••••••••••••</div>
+
+        <div class="gen-row">
+          <span>Länge: <strong id="gen-len-val">20</strong> Zeichen</span>
+          <input type="range" id="gen-len-slider" min="8" max="36" value="20" style="width: 140px; cursor: pointer;">
+        </div>
+
+        <div class="gen-options">
+          <label><input type="checkbox" id="gen-opt-upper" checked> Großbuchst. (A-Z)</label>
+          <label><input type="checkbox" id="gen-opt-lower" checked> Kleinbuchst. (a-z)</label>
+          <label><input type="checkbox" id="gen-opt-numbers" checked> Zahlen (0-9)</label>
+          <label><input type="checkbox" id="gen-opt-symbols" checked> Symbole (!@#$)</label>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="btn-gen-copy">📋 Kopieren</button>
+          <button class="btn btn-secondary" id="btn-gen-refresh">🎲 Neu</button>
+          <button class="btn" id="btn-gen-autofill" style="background: #10b981;">⚡ Einfügen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <a href="http://127.0.0.1:8000" target="_blank" id="footer-vault-link">🌐 Web-Tresor</a>
+    <span id="sync-info">Lade...</span>
+  </div>
+
+  <div class="toast-popup" id="popup-toast">Kopiert!</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

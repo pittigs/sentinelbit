@@ -1,0 +1,11 @@
+﻿.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+vault.db
+test_sync_output/
+SENTINELBIT_data/
+.env
+

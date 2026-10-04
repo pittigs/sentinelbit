@@ -1,0 +1,30 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+sentinelbit
+sentinelbit.exe
+
+# Database & Runtime Secrets
+*.db
+*.db-wal
+*.db-shm
+.server_secret
+.sentinelbit_session.json
+
+# Temporary & Test Dirs
+test_sync_output/
+backups/
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

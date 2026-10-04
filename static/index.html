@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sentinelbit - Zero-Knowledge Password & Passkey Manager</title>
+  <link rel="stylesheet" href="/static/styles.css?v=2.7">
+</head>
+<body>
+
+  <!-- ============================================================
+       AUTH SCREEN (Login / Registration / 2FA Prompt)
+  ============================================================ -->
+  <div id="auth-container">
+    <div class="auth-card">
+      <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 24px;">
+        <img src="/static/logo.jpg" alt="sentinelbit Logo" class="brand-logo-img">
+        <div>
+          <h2 style="font-size: 1.4rem; letter-spacing: -0.01em;">sentinelbit</h2>
+          <p style="font-size: 0.8rem; color: var(--text-dim);">Zero-Knowledge Tresor & Passkeys</p>
+        </div>
+      </div>
+
+      <!-- Login Form -->
+      <div id="login-section">
+        <button type="button" id="btn-biometric-unlock" class="btn btn-biometric" style="width: 100%; margin-bottom: 14px; display: none;" onclick="handleBiometricUnlock()">
+          🖐️ Mit Windows Hello / Fingerabdruck entsperren
+        </button>
+        <div id="biometric-divider" style="display: none; text-align: center; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 14px;">
+          — ODER MIT MASTER-PASSWORT —
+        </div>
+
+        <form id="form-login" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-username">Benutzername</label>
+            <input type="text" id="login-username" class="form-input" required placeholder="z. B. sebastian" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">Master-Passwort</label>
+            <input type="password" id="login-password" class="form-input" required placeholder="••••••••••••••••" autocomplete="current-password">
+            <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">Dein Master-Passwort verlässt niemals deinen Browser unverschlüsselt.</p>
+          </div>
+
+          <!-- 2FA Input (dynamically visible if user has 2FA enabled) -->
+          <div class="form-group" id="login-totp-group" style="display: none;">
+            <label for="login-totp" style="color: var(--color-totp); display: flex; justify-content: space-between;">
+              <span>Zwei-Faktor-Code (2FA / TOTP)</span>
+              <a href="#" onclick="toggleRecoveryCodeInput(event)" style="font-size: 0.75rem; color: var(--accent-primary);">Notfall-Code?</a>
+            </label>
+            <input type="text" id="login-totp" class="form-input" placeholder="6-stelliger Code (z.B. 123456)" maxlength="6" inputmode="numeric">
+          </div>
+
+          <!-- Recovery Code Input -->
+          <div class="form-group" id="login-recovery-group" style="display: none;">
+            <label for="login-recovery" style="color: var(--color-warning);">Wiederherstellungscode (Recovery Code)</label>
+            <input type="text" id="login-recovery" class="form-input" placeholder="8-stelliger Code">
+          </div>
+
+          <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+            Tresor entschlüsseln
+          </button>
+        </form>
+
+        <div style="text-align: center; margin-top: 20px; font-size: 0.85rem; color: var(--text-muted);">
+          Noch kein Tresor vorhanden? 
+          <a href="#" onclick="showRegisterView(event)" style="color: var(--accent-primary); text-decoration: none; font-weight: 600;">Konto erstellen</a>
+        </div>
+      </div>
+
+      <!-- Registration Form -->
+      <div id="register-section" style="display: none;">
+        <form id="form-register" onsubmit="handleRegister(event)">
+          <div class="form-group">
+            <label for="reg-username">Neuer Benutzername</label>
+            <input type="text" id="reg-username" class="form-input" required placeholder="z. B. sebastian">
+          </div>
+          <div class="form-group">
+            <label for="reg-password">Master-Passwort festlegen</label>
+            <input type="password" id="reg-password" class="form-input" required placeholder="Mindestens 10 Zeichen" oninput="checkMasterPasswordStrength(this.value)">
+            <div class="strength-bar"><div id="reg-strength-fill" class="strength-bar-fill"></div></div>
+            <p id="reg-strength-text" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">Wähle ein starkes, einzigartiges Passwort.</p>
+          </div>
+          <div class="form-group">
+            <label for="reg-password-confirm">Master-Passwort bestätigen</label>
+            <input type="password" id="reg-password-confirm" class="form-input" required placeholder="Passwort wiederholen">
+          </div>
+
+          <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+            <strong style="color: #60a5fa;">🔒 Zero-Knowledge Garantie:</strong><br>
+            Der Verschlüsselungsschlüssel (AES-256-GCM) wird via PBKDF2 direkt in deinem Web-Browser abgeleitet. Wenn du dein Master-Passwort vergisst, kann niemand deine Daten wiederherstellen.
+          </div>
+
+          <button type="submit" id="btn-register-submit" class="btn btn-primary" style="width: 100%;">
+            Tresor initialisieren & Konto anlegen
+          </button>
+        </form>
+
+        <div style="text-align: center; margin-top: 20px; font-size: 0.85rem; color: var(--text-muted);">
+          Bereits registriert? 
+          <a href="#" onclick="showLoginView(event)" style="color: var(--accent-primary); text-decoration: none; font-weight: 600;">Zurück zur Anmeldung</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MAIN VAULT INTERFACE (Single-Page Application)
+  ============================================================ -->
+  <div id="app-container" class="app-container" style="display: none;">
+    
+    <!-- Dynamic Island Sidebar Navigation -->
+    <aside class="sidebar" id="app-sidebar">
+      <div class="brand">
+        <img src="/static/logo.jpg" alt="sentinelbit Logo" class="brand-logo-img">
+        <div class="brand-info">
+          <div class="brand-title">sentinelbit</div>
+          <div class="brand-subtitle" id="user-display">Angemeldet als ...</div>
+        </div>
+        <button type="button" class="sidebar-pin-btn" id="sidebar-pin-btn" onclick="toggleSidebarPin()" title="Dynamic Island fixieren (Dauerhaft geöffnet)">
+          📌
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Tresor</div>
+        <div class="nav-item active" onclick="switchTab('all')" title="Alle Einträge">
+          <div class="nav-item-content">
+            <span class="nav-icon">📁</span>
+            <span class="nav-text">Alle Einträge</span>
+          </div>
+          <span class="badge" id="count-all">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('login')" title="Anmeldungen">
+          <div class="nav-item-content">
+            <span class="nav-icon">🔑</span>
+            <span class="nav-text">Anmeldungen</span>
+          </div>
+          <span class="badge" id="count-login">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('passkey')" title="Passkeys (FIDO2)">
+          <div class="nav-item-content" style="color: #a78bfa;">
+            <span class="nav-icon">⚡</span>
+            <span class="nav-text">Passkeys (FIDO2)</span>
+          </div>
+          <span class="badge badge-passkey" id="count-passkey">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('totp')" title="2FA Authenticator">
+          <div class="nav-item-content" style="color: #34d399;">
+            <span class="nav-icon">⏱️</span>
+            <span class="nav-text">2FA Authenticator</span>
+          </div>
+          <span class="badge badge-totp" id="count-totp">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('note')" title="Sichere Notizen">
+          <div class="nav-item-content">
+            <span class="nav-icon">📝</span>
+            <span class="nav-text">Sichere Notizen</span>
+          </div>
+          <span class="badge" id="count-note">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('card')" title="Zahlungskarten">
+          <div class="nav-item-content">
+            <span class="nav-icon">💳</span>
+            <span class="nav-text">Zahlungskarten</span>
+          </div>
+          <span class="badge" id="count-card">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('favorite')" title="Favoriten">
+          <div class="nav-item-content">
+            <span class="nav-icon">⭐</span>
+            <span class="nav-text">Favoriten</span>
+          </div>
+          <span class="badge" id="count-favorite">0</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('trash')" title="Papierkorb">
+          <div class="nav-item-content" style="color: #f87171;">
+            <span class="nav-icon">🗑️</span>
+            <span class="nav-text">Papierkorb</span>
+          </div>
+          <span class="badge badge-trash" id="count-trash">0</span>
+        </div>
+
+        <div class="nav-label" style="margin-top: 14px;">Werkzeuge</div>
+        <div class="nav-item" onclick="openGeneratorModal()" title="Passwort- & Passphrase-Generator">
+          <div class="nav-item-content">
+            <span class="nav-icon">🎲</span>
+            <span class="nav-text">Passwort-Generator</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openPasskeyPlaygroundModal()" title="Passkey Labor (WebAuthn)">
+          <div class="nav-item-content">
+            <span class="nav-icon">🧪</span>
+            <span class="nav-text">Passkey Labor</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openAuditModal()" title="Sicherheits-Audit (HIBP Leak-Check)">
+          <div class="nav-item-content">
+            <span class="nav-icon">🔍</span>
+            <span class="nav-text">Sicherheits-Audit</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openBiometricModal()" title="Windows Hello / Biometrie">
+          <div class="nav-item-content">
+            <span class="nav-icon">🖐️</span>
+            <span class="nav-text">Windows Hello</span>
+          </div>
+          <span class="badge" id="badge-biometric-status">Aus</span>
+        </div>
+        <div class="nav-item" onclick="open2FaModal()" title="Tresor-2FA (TOTP)">
+          <div class="nav-item-content">
+            <span class="nav-icon">🔐</span>
+            <span class="nav-text">Tresor-2FA</span>
+          </div>
+          <span class="badge" id="badge-vault-2fa-status">Aus</span>
+        </div>
+        <div class="nav-item" onclick="openBackupModal()" title="Backup & Import / Export">
+          <div class="nav-item-content">
+            <span class="nav-icon">💾</span>
+            <span class="nav-text">Backup & Import</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openCleanupModal()" title="Duplikate entfernen & Tresor bereinigen">
+          <div class="nav-item-content" style="color: #f59e0b;">
+            <span class="nav-icon">🧹</span>
+            <span class="nav-text">Bereinigung</span>
+          </div>
+          <span class="badge" id="badge-duplicates-count" style="display: none; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);">0</span>
+        </div>
+        <div class="nav-item" onclick="openSyncSettingsModal()" title="Auto-Sync & Backup-Plan">
+          <div class="nav-item-content" style="color: #38bdf8;">
+            <span class="nav-icon">🔄</span>
+            <span class="nav-text">Auto-Sync Plan</span>
+          </div>
+          <span class="badge" id="badge-sync-status">Aus</span>
+        </div>
+        <div class="nav-item" onclick="openAliasesModal()" title="E-Mail-Aliase">
+          <div class="nav-item-content">
+            <span class="nav-icon">🎭</span>
+            <span class="nav-text">E-Mail-Aliase</span>
+          </div>
+          <span class="badge" id="count-aliases">0</span>
+        </div>
+        <div class="nav-item" onclick="openSharingModal()" title="Geteilte Einträge">
+          <div class="nav-item-content">
+            <span class="nav-icon">👥</span>
+            <span class="nav-text">Geteilte Einträge</span>
+          </div>
+          <span class="badge" id="count-shared">0</span>
+        </div>
+        <div class="nav-item" onclick="openExtensionModal()" title="Browser-Erweiterung (Auto-Fill)">
+          <div class="nav-item-content" style="color: #60a5fa;">
+            <span class="nav-icon">🧩</span>
+            <span class="nav-text">Browser-Addon</span>
+          </div>
+          <span class="badge" id="badge-extension-status" style="display:none; background: rgba(16, 185, 129, 0.2); color: #34d399;">Aktiv</span>
+        </div>
+        <div class="nav-item" onclick="openEmergencyKitModal()" title="Notfall-Kit drucken">
+          <div class="nav-item-content" style="color: #fbbf24;">
+            <span class="nav-icon">📄</span>
+            <span class="nav-text">Notfall-Kit</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-info">
+          <span style="font-size: 0.72rem; color: var(--text-dim);">Auto-Lock:</span>
+          <span style="font-size: 0.8rem; font-weight: 600; color: #60a5fa;" id="auto-lock-timer">15:00</span>
+        </div>
+        <button class="sidebar-lock-btn" onclick="lockVault()" title="Tresor sofort sperren">
+          🔒
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-wrapper">
+      
+      <!-- Top Action Bar -->
+      <header class="top-bar">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="vault-search" class="search-input" placeholder="Suche nach Titeln, URLs, Benutzern (Ctrl + K)..." oninput="filterVaultItems()">
+        </div>
+
+        <div class="top-actions">
+          <!-- Dark/Light Theme Toggle -->
+          <button class="btn btn-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Design umschalten (Dunkel / Hell)">
+            🌙
+          </button>
+          <!-- Grid vs List View Toggle -->
+          <button class="view-toggle-btn active" id="btn-view-grid" onclick="setViewMode('grid')" title="Kachelansicht">
+            ▦
+          </button>
+          <button class="view-toggle-btn" id="btn-view-list" onclick="setViewMode('list')" title="Kompakte Listenansicht">
+            ☰
+          </button>
+
+          <button class="btn btn-passkey" onclick="openAddPasskeyModal()">
+            ⚡ Passkey erstellen
+          </button>
+          <button class="btn btn-primary" onclick="openAddItemModal()">
+            + Neuer Eintrag
+          </button>
+        </div>
+      </header>
+
+      <!-- Vault Grid / List View -->
+      <section class="content-area">
+        <!-- Quick Filter Pills -->
+        <div class="filter-pills">
+          <div class="filter-pill active" onclick="switchTab('all')">Alle</div>
+          <div class="filter-pill" onclick="switchTab('login')">🔑 Logins</div>
+          <div class="filter-pill" onclick="switchTab('passkey')">⚡ Passkeys</div>
+          <div class="filter-pill" onclick="switchTab('totp')">⏱️ 2FA Codes</div>
+          <div class="filter-pill" onclick="switchTab('note')">📝 Notizen</div>
+          <div class="filter-pill" onclick="switchTab('card')">💳 Karten</div>
+          <div class="filter-pill" onclick="switchTab('favorite')">⭐ Favoriten</div>
+          <div class="filter-pill" onclick="switchTab('trash')">🗑️ Papierkorb</div>
+        </div>
+
+        <!-- Gamification & Security Health Banner -->
+        <div class="security-status-banner" id="gamification-banner">
+          <div style="display: flex; align-items: center; gap: 18px;">
+            <div class="security-score-circle" id="security-score-ring" style="--score-pct: 85%;">
+              <div class="security-score-inner">
+                <span id="security-score-val">85%</span>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h3 style="font-size: 1.05rem;" id="security-rank-title">Sentinel-Wächter</h3>
+                <span class="badge badge-totp" id="security-level-badge">Level 3</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" id="security-feedback-text">
+                Hervorragend! Dein Tresor ist durch Zero-Knowledge und starke Schlüssel geschützt.
+              </p>
+              <!-- Unlocked & Locked Achievements -->
+              <div class="badges-bar" id="achievements-container">
+                <!-- Dynamically populated via renderAchievements() -->
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px; white-space: nowrap;" onclick="openAchievementsModal()">
+            🏆 Alle Erfolge
+          </button>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+          <div>
+            <h2 id="current-view-title" style="font-size: 1.3rem;">Alle Einträge</h2>
+            <p id="current-view-desc" style="font-size: 0.82rem; color: var(--text-muted);">Übersicht über alle sicher verschlüsselten Zugangsdaten.</p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <span class="badge badge-secure">AES-256-GCM End-to-End</span>
+          </div>
+        </div>
+
+        <div id="empty-state" style="display: none; text-align: center; padding: 60px 20px; border: 2px dashed var(--border-color); border-radius: var(--radius-xl);">
+          <div style="font-size: 2.5rem; margin-bottom: 12px;">🛡️</div>
+          <h3 style="margin-bottom: 8px;">Noch keine Einträge in diesem Bereich</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 400px; margin: 0 auto 20px auto;">
+            Erstelle deinen ersten verschlüsselten Login oder speichere einen FIDO2 Passkey für deine Online-Dienste.
+          </p>
+          <div style="display: flex; justify-content: center; gap: 10px;">
+            <button class="btn btn-primary" onclick="openAddItemModal()">+ Eintrag anlegen</button>
+            <button class="btn btn-passkey" onclick="openAddPasskeyModal()">⚡ Passkey generieren</button>
+          </div>
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="items-grid" id="items-container">
+          <!-- Dynamically populated cards -->
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ============================================================
+       MODAL: ITEM (ADD / EDIT)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-item">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modal-item-title">Neuer Tresor-Eintrag</h3>
+        <button class="btn-icon" onclick="closeModal('modal-item')">✕</button>
+      </div>
+
+      <form id="form-vault-item" onsubmit="saveVaultItem(event)">
+        <input type="hidden" id="item-id">
+        
+        <div class="form-group">
+          <label for="item-type">Typ</label>
+          <select id="item-type" class="form-select" onchange="toggleItemTypeFields(this.value)">
+            <option value="login">🔑 Login (Benutzername & Passwort)</option>
+            <option value="note">📝 Sichere Notiz</option>
+            <option value="card">💳 Zahlungskarte</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="item-title">Titel / Name</label>
+          <input type="text" id="item-title" class="form-input" required placeholder="z. B. GitHub, Google, Amazon">
+        </div>
+
+        <!-- Login specific fields -->
+        <div id="fields-login">
+          <div class="form-group">
+            <label for="item-url">Website-URL</label>
+            <input type="url" id="item-url" class="form-input" placeholder="https://github.com">
+          </div>
+
+          <div class="form-group">
+            <label for="item-username">Benutzername / E-Mail</label>
+            <input type="text" id="item-username" class="form-input" placeholder="max@beispiel.de">
+          </div>
+
+          <div class="form-group">
+            <label for="item-password">Passwort</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="password" id="item-password" class="form-input" placeholder="••••••••••••" oninput="evaluateItemPasswordStrength(this.value)">
+              <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('item-password')" title="Sichtbarkeit">👁️</button>
+              <button type="button" class="btn btn-secondary" onclick="generatePasswordIntoField('item-password')" title="Zufälliges Passwort einfügen">🎲</button>
+            </div>
+            <div class="strength-bar" style="margin-top: 6px;"><div id="item-strength-fill" class="strength-bar-fill"></div></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+              <span id="item-strength-text" style="font-size: 0.72rem; color: var(--text-dim);">Passwort-Sicherheit</span>
+              <a href="#" id="btn-toggle-history" onclick="togglePasswordHistoryView(event)" style="font-size: 0.75rem; color: var(--accent-primary); text-decoration: none;">📜 Passwort-Historie (0)</a>
+            </div>
+            <div id="password-history-list" style="display: none; margin-top: 8px; max-height: 120px; overflow-y: auto;"></div>
+          </div>
+
+          <!-- Integrated TOTP Authenticator field -->
+          <div class="form-group">
+            <label for="item-totp" style="color: #34d399;">⏱️ 2FA-Schlüssel (TOTP / Authenticator Secret)</label>
+            <input type="text" id="item-totp" class="form-input" placeholder="z. B. JBSWY3DPEHPK3PXP oder otpauth:// URI">
+            <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">
+              Wird automatisch in einen 6-stelligen rotierenden Code verwandelt (wie Google Authenticator).
+            </p>
+          </div>
+        </div>
+
+        <!-- File Attachment (AES-256 encrypted) -->
+        <div class="form-group" style="background: rgba(255, 255, 255, 0.02); border: 1px dashed var(--border-color); border-radius: var(--radius-md); padding: 12px; margin-top: 10px;">
+          <label style="color: #60a5fa; margin-bottom: 4px;">📎 Verschlüsselter Dateianhang</label>
+          <input type="file" id="item-attachment-file" class="form-input" style="padding: 6px;" onchange="handleAttachmentSelected(event)">
+          <div id="attachment-preview" style="margin-top: 8px; font-size: 0.8rem; display: none;"></div>
+        </div>
+
+        <!-- Note specific fields -->
+        <div id="fields-note" style="display: none;">
+          <div class="form-group">
+            <label for="item-notes">Verschlüsselter Text / Notizen</label>
+            <textarea id="item-notes" class="form-textarea" rows="6" placeholder="Vertrauliche Informationen, Recovery-Schlüssel, PINs..."></textarea>
+          </div>
+        </div>
+
+        <!-- Card specific fields -->
+        <div id="fields-card" style="display: none;">
+          <div class="form-group">
+            <label for="item-card-number">Kartennummer</label>
+            <input type="text" id="item-card-number" class="form-input" placeholder="4111 2222 3333 4444">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group">
+              <label for="item-card-expiry">Gültig bis</label>
+              <input type="text" id="item-card-expiry" class="form-input" placeholder="MM/YY">
+            </div>
+            <div class="form-group">
+              <label for="item-card-cvv">CVV / Prüfnummer</label>
+              <input type="password" id="item-card-cvv" class="form-input" placeholder="123">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none;">
+            <input type="checkbox" id="item-favorite"> Zu Favoriten hinzufügen
+          </label>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-item')">Abbrechen</button>
+          <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: PASSKEY ERSTELLEN / VERWALTEN (FIDO2)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-passkey">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">⚡</span>
+          <div>
+            <h3>Passkey erstellen & registrieren</h3>
+            <p style="font-size: 0.8rem; color: #a78bfa;">FIDO2 / WebAuthn (ECDSA P-256)</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-passkey')">✕</button>
+      </div>
+
+      <form id="form-passkey" onsubmit="savePasskey(event)">
+        <div class="form-group">
+          <label for="pk-rp-id">Relying Party ID (Domain)</label>
+          <input type="text" id="pk-rp-id" class="form-input" required placeholder="z. B. github.com, google.com, apple.com">
+          <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">Die Web-Domain, für die dieser Passkey gültig ist.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="pk-rp-name">Dienst-Name</label>
+          <input type="text" id="pk-rp-name" class="form-input" required placeholder="z. B. GitHub Enterprise, Google Account">
+        </div>
+
+        <div class="form-group">
+          <label for="pk-username">Benutzername / Kontoname</label>
+          <input type="text" id="pk-username" class="form-input" required placeholder="z. B. sebastian@domain.com">
+        </div>
+
+        <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #c4b5fd; margin-bottom: 6px;">Kryptographisches Schlüsselpaar:</div>
+          <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+            Es wird ein NIST P-256 (secp256r1) Schlüsselpaar erzeugt. Der private Schlüssel wird mit AES-256-GCM verschlüsselt im Tresor gespeichert, während der öffentliche Schlüssel (COSE/PEM) für WebAuthn-Prüfungen bereitsteht.
+          </p>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-passkey')">Abbrechen</button>
+          <button type="submit" class="btn btn-passkey">Passkey generieren & speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: PASSKEY INSPEKTOR & WEBAUTHN PLAYGROUND
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-passkey-playground">
+    <div class="modal-dialog" style="max-width: 650px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🧪</span>
+          <div>
+            <h3>Passkey WebAuthn Testlabor</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Live-Simulation einer WebAuthn-Authentifizierung</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-passkey-playground')">✕</button>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Wähle einen gespeicherten Passkey:</label>
+        <select id="playground-passkey-select" class="form-select" onchange="loadPasskeyIntoPlayground(this.value)"></select>
+      </div>
+
+      <div id="playground-details" style="display: none; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; font-size: 0.82rem;">
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 6px; margin-bottom: 6px;">
+          <span style="color: var(--text-dim);">Credential ID:</span>
+          <code id="play-cred-id" style="color: #60a5fa; word-break: break-all;"></code>
+        </div>
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 6px; margin-bottom: 6px;">
+          <span style="color: var(--text-dim);">Public Key COSE:</span>
+          <code id="play-cose" style="color: #34d399; word-break: break-all;"></code>
+        </div>
+        <div style="display: grid; grid-template-columns: 120px 1fr; gap: 6px;">
+          <span style="color: var(--text-dim);">Signatures:</span>
+          <span id="play-sign-count">0 Signaturen</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="play-challenge">Server Challenge (clientDataJSON Simulation)</label>
+        <textarea id="play-challenge" class="form-textarea" rows="3">{"type":"webauthn.get","challenge":"dGhpcy1pcy1hLXNlY3VyZS1jaGFsbGVuZ2U","origin":"https://github.com"}</textarea>
+      </div>
+
+      <button type="button" class="btn btn-passkey" style="width: 100%;" onclick="executePlaygroundSignature()">
+        ⚡ Assertion mit privatem ECDSA-Schlüssel signieren
+      </button>
+
+      <div id="playground-result" style="display: none; margin-top: 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 14px;">
+        <strong style="color: #34d399; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+          <span>✓</span> WebAuthn Assertion erfolgreich signiert!
+        </strong>
+        <div style="font-size: 0.78rem; font-family: monospace; word-break: break-all; color: var(--text-main);">
+          <div style="color: var(--text-dim); margin-bottom: 4px;">ECDSA DER Signatur (Base64URL):</div>
+          <div id="play-result-sig" style="color: #a78bfa; background: var(--bg-card); padding: 8px; border-radius: 4px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: VAULT 2FA SETUP (TOTP)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-2fa">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🔐</span>
+          <div>
+            <h3>Tresor-2FA absichern (TOTP)</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Google Authenticator, sentinelbit, 1Password</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-2fa')">✕</button>
+      </div>
+
+      <!-- State: Enable / Setup -->
+      <div id="2fa-setup-view">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
+          Scanne den folgenden QR-Code mit deiner bevorzugten Authenticator-App auf deinem Smartphone:
+        </p>
+
+        <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+          <div style="background: white; padding: 12px; border-radius: var(--radius-md); display: inline-block;">
+            <img id="2fa-qr-img" src="" alt="2FA QR Code" style="width: 180px; height: 180px; display: block;">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Manueller Schlüssel:</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="2fa-secret-text" class="form-input" readonly style="font-family: monospace;">
+            <button type="button" class="btn btn-secondary" onclick="copyToClipboard(document.getElementById('2fa-secret-text').value, 'Schlüssel kopiert')">Kopieren</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="2fa-verify-code">Bestätigungscode eingeben (6 Ziffern)</label>
+          <input type="text" id="2fa-verify-code" class="form-input" placeholder="123456" maxlength="6" inputmode="numeric">
+        </div>
+
+        <button type="button" class="btn btn-primary" style="width: 100%;" onclick="confirmEnable2Fa()">
+          2FA aktivieren
+        </button>
+      </div>
+
+      <!-- State: Already Enabled -->
+      <div id="2fa-enabled-view" style="display: none;">
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 16px; margin-bottom: 16px;">
+          <strong style="color: #34d399; display: block; margin-bottom: 6px;">✓ Zwei-Faktor-Authentifizierung ist aktiv</strong>
+          <p style="font-size: 0.82rem; color: var(--text-muted);">
+            Dein Master-Passwort wird bei jeder Anmeldung durch einen zeitbasierten Einmalcode geschützt.
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="2fa-disable-code">Code oder Recovery-Code zum Deaktivieren:</label>
+          <input type="text" id="2fa-disable-code" class="form-input" placeholder="Code">
+        </div>
+
+        <button type="button" class="btn btn-danger" style="width: 100%;" onclick="disable2Fa()">
+          2FA deaktivieren
+        </button>
+      </div>
+
+      <!-- Recovery Codes Display -->
+      <div id="2fa-recovery-codes-view" style="display: none; margin-top: 16px;">
+        <h4 style="color: var(--color-warning); margin-bottom: 8px;">⚠️ Notfall-Wiederherstellungscodes</h4>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">
+          Speichere diese Einmalcodes an einem sicheren Ort. Solltest du dein Smartphone verlieren, kannst du dich mit diesen Codes einloggen:
+        </p>
+        <div id="recovery-codes-list" style="background: var(--bg-card); padding: 12px; border-radius: var(--radius-md); font-family: monospace; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: PASSWORT-GENERATOR
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-generator">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Passwort- & Passphrase-Generator</h3>
+        <button class="btn-icon" onclick="closeModal('modal-generator')">✕</button>
+      </div>
+
+      <div class="tab-nav">
+        <button type="button" class="tab-btn active" id="tab-gen-char" onclick="switchGenMode('char')">Zufallszeichen</button>
+        <button type="button" class="tab-btn" id="tab-gen-phrase" onclick="switchGenMode('phrase')">Wort-Passphrase (Diceware)</button>
+      </div>
+
+      <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
+        <div id="gen-password-display" style="font-family: monospace; font-size: 1.3rem; word-break: break-all; color: #60a5fa; margin-bottom: 8px;"></div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" style="flex: 1;" onclick="copyToClipboard(document.getElementById('gen-password-display').innerText, 'Passwort kopiert!')">Kopieren</button>
+          <button class="btn btn-primary" onclick="runPasswordGenerator()">Neu würfeln</button>
+        </div>
+      </div>
+
+      <!-- Mode 1: Random Characters -->
+      <div id="gen-mode-char">
+        <div class="form-group">
+          <label for="gen-length" style="display: flex; justify-content: space-between;">
+            <span>Länge:</span>
+            <span id="gen-length-val">20</span>
+          </label>
+          <input type="range" id="gen-length" min="10" max="64" value="20" style="width: 100%;" oninput="document.getElementById('gen-length-val').innerText = this.value; runPasswordGenerator();">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" id="gen-upper" checked onchange="runPasswordGenerator()"> Großbuchstaben (A-Z)
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" id="gen-lower" checked onchange="runPasswordGenerator()"> Kleinbuchstaben (a-z)
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" id="gen-numbers" checked onchange="runPasswordGenerator()"> Zahlen (0-9)
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" id="gen-symbols" checked onchange="runPasswordGenerator()"> Sonderzeichen (!@#$...)
+          </label>
+        </div>
+      </div>
+
+      <!-- Mode 2: Diceware Passphrase -->
+      <div id="gen-mode-phrase" style="display: none;">
+        <div class="form-group">
+          <label for="gen-words" style="display: flex; justify-content: space-between;">
+            <span>Wort-Anzahl:</span>
+            <span id="gen-words-val">4</span>
+          </label>
+          <input type="range" id="gen-words" min="3" max="8" value="4" style="width: 100%;" oninput="document.getElementById('gen-words-val').innerText = this.value; runPasswordGenerator();">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+          <div class="form-group">
+            <label for="gen-sep">Trennzeichen:</label>
+            <select id="gen-sep" class="form-select" onchange="runPasswordGenerator()">
+              <option value="-">Bindestrich (-)</option>
+              <option value=".">Punkt (.)</option>
+              <option value="_">Unterstrich (_)</option>
+              <option value=" ">Leerzeichen ( )</option>
+            </select>
+          </div>
+          <div style="display: flex; flex-direction: column; justify-content: center; gap: 8px; margin-top: 10px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" id="gen-cap" checked onchange="runPasswordGenerator()"> Wörter großschreiben
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" id="gen-num-suffix" checked onchange="runPasswordGenerator()"> Zahl anhängen
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-generator')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: SICHERHEITS-AUDIT & HIBP BREACH CHECK
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-audit">
+    <div class="modal-dialog" style="max-width: 620px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🔍</span>
+          <div>
+            <h3>Tresor-Sicherheits-Audit & Datenleak-Check</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Prüfung auf schwache Passwörter & HaveIBeenPwned (k-Anonymity)</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-audit')">✕</button>
+      </div>
+
+      <div id="audit-results" style="font-size: 0.9rem;">
+        <!-- Filled by JS -->
+      </div>
+
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <h4 style="font-size: 0.95rem; color: #f87171;">🛡️ HaveIBeenPwned Leak-Check</h4>
+            <p style="font-size: 0.78rem; color: var(--text-muted);">
+              Prüft, ob deine Passwörter in bekannten Leaks vorkommen. Durch k-Anonymity verlassen Passwörter niemals deinen Browser.
+            </p>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-run-hibp" onclick="runHibpBreachCheck()">
+            Leak-Check starten
+          </button>
+        </div>
+        <div id="hibp-results-container" style="display: none; margin-top: 12px; max-height: 180px; overflow-y: auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: BIOMETRISCHE ENTSPERRUNG (WINDOWS HELLO / TOUCH ID)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-biometric">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🖐️</span>
+          <div>
+            <h3>Windows Hello / Biometrisches Entsperren</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">FIDO2 Platform Authenticator (PIN / Fingerabdruck)</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-biometric')">✕</button>
+      </div>
+
+      <div id="bio-status-card" style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
+        <strong style="color: #60a5fa;">Wie funktioniert das?</strong><br>
+        Dein Browser erzeugt ein gerätegebundenes WebAuthn-Zertifikat. Dein Master-Schlüssel wird hardware-gesichert für dieses Gerät verschlüsselt hinterlegt, sodass du dich beim nächsten Start mit einer Berührung deines Fingerabdrucksensors oder deiner Windows-PIN anmelden kannst.
+      </div>
+
+      <div id="bio-action-container">
+        <button type="button" class="btn btn-biometric" style="width: 100%; margin-bottom: 10px;" onclick="enableBiometricUnlockOnThisDevice()">
+          🖐️ Dieses Gerät für Windows Hello registrieren
+        </button>
+        <button type="button" class="btn btn-danger" style="width: 100%; display: none;" id="btn-disable-bio" onclick="disableBiometricUnlockOnThisDevice()">
+          Biometrische Entsperrung für dieses Gerät deaktivieren
+        </button>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-biometric')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: BACKUP & EXPORT / IMPORT
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-backup">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">💾</span>
+          <div>
+            <h3>Backup & Export / Import</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Verschlüsselt oder im Klartext sichern</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-backup')">✕</button>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h4 style="margin-bottom: 8px;">Tresor exportieren</h4>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+          Lade eine vollständige JSON-Sicherung deiner Logins, Passkeys und Notizen herunter.
+        </p>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-primary" onclick="exportVault(true)">🔒 Verschlüsseltes JSON-Backup</button>
+          <button class="btn btn-secondary" onclick="exportVault(false)">📄 Entschlüsseltes JSON</button>
+        </div>
+      </div>
+
+      <hr style="border-color: var(--border-color); margin: 20px 0;">
+
+      <div>
+        <h4 style="margin-bottom: 8px;">Daten importieren</h4>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px;">
+          Unterstützt sentinelbit Backups, <strong>Bitwarden</strong> (JSON/CSV), <strong>1Password</strong> (1PUX/CSV), <strong>KeePassXC</strong> (CSV), <strong>LastPass</strong> sowie Browser-Exporte (<strong>Google Chrome & Firefox</strong> CSV).
+        </p>
+        <input type="file" id="backup-file-input" accept=".json,.csv,.1pux" class="form-input" style="margin-bottom: 10px;">
+        <button class="btn btn-secondary" onclick="importVault()">📥 Backup / Import einspielen</button>
+
+        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.8rem; color: var(--text-dim);">Duplikate nach mehrfachem Import?</span>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 5px 12px;" onclick="closeModal('modal-backup'); openCleanupModal();">
+            🧹 Tresor bereinigen
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: AUTO-SYNC & BACKUP-PLAN
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-sync">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🔄</span>
+          <div>
+            <h3>Automatischer Backup- & Sync-Plan</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Kontinuierliche verschlüsselte Sicherung in Wunschordner</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-sync')">✕</button>
+      </div>
+
+      <form id="form-sync-settings" onsubmit="saveSyncSettings(event)">
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none; color: #38bdf8; font-weight: 600;">
+            <input type="checkbox" id="sync-active" checked> Automatischen Sync-Dienst aktivieren
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label for="sync-target-dir">Zielverzeichnis (Ordnerpfad)</label>
+          <input type="text" id="sync-target-dir" class="form-input" required placeholder="z. B. C:\Backups\sentinelbit oder D:\USB_Stick">
+          <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">
+            Pfad auf deiner Festplatte, einem USB-Laufwerk oder einem Cloud-Ordner (Nextcloud, Dropbox, OneDrive).
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="sync-interval">Intervall</label>
+            <select id="sync-interval" class="form-select">
+              <option value="5">Alle 5 Minuten</option>
+              <option value="15" selected>Alle 15 Minuten</option>
+              <option value="30">Alle 30 Minuten</option>
+              <option value="60">Jede Stunde</option>
+              <option value="1440">Einmal täglich</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sync-retention">Snapshots behalten</label>
+            <input type="number" id="sync-retention" class="form-input" min="1" max="100" value="10">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; text-transform: none;">
+            <input type="checkbox" id="sync-on-change" checked> Sofort synchronisieren bei jeder Tresor-Änderung
+          </label>
+        </div>
+
+        <div id="sync-status-info" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px; font-size: 0.82rem;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="color: var(--text-dim);">Letzter Sync:</span>
+            <span id="sync-last-time" style="font-weight: 600;">Nie</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--text-dim);">Status:</span>
+            <span id="sync-last-status" style="color: #34d399;">Bereit</span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+          <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="triggerManualSyncNow()">
+            ⚡ Jetzt sofort synchronisieren
+          </button>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sync')">Schließen</button>
+          <button type="submit" class="btn btn-primary">Plan speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: E-MAIL-ALIASE ("HIDE MY EMAIL")
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-aliases">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🎭</span>
+          <div>
+            <h3>Maskierte E-Mail-Aliase</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Echte E-Mail-Adresse vor Spam & Leaks schützen</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-aliases')">✕</button>
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <input type="text" id="alias-service-input" class="form-input" placeholder="Dienstname (z. B. Netflix, Newsletter, eBay)">
+        <button type="button" class="btn btn-primary" onclick="generateNewAlias()">+ Alias generieren</button>
+      </div>
+
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; font-weight: 600;">Aktive Aliase:</div>
+      <div id="aliases-list" style="max-height: 250px; overflow-y: auto;">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: GETEILTE EINTRÄGE (SHARING)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-sharing">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">👥</span>
+          <div>
+            <h3>Sicheres Teilen von Einträgen</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Ende-zu-Ende verschlüsselte Freigabe an andere Nutzer</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-sharing')">✕</button>
+      </div>
+
+      <div class="tab-nav">
+        <button type="button" class="tab-btn active" id="tab-share-inbox" onclick="switchShareTab('inbox')">Posteingang (Empfangen)</button>
+        <button type="button" class="tab-btn" id="tab-share-send" onclick="switchShareTab('send')">Eintrag freigeben</button>
+      </div>
+
+      <!-- Tab: Inbox -->
+      <div id="share-view-inbox">
+        <div id="share-inbox-list" style="max-height: 250px; overflow-y: auto;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Tab: Send -->
+      <div id="share-view-send" style="display: none;">
+        <div class="form-group">
+          <label for="share-recipient-username">Empfänger-Benutzername</label>
+          <input type="text" id="share-recipient-username" class="form-input" placeholder="z. B. partner, kollege">
+        </div>
+        <div class="form-group">
+          <label for="share-select-item">Wähle einen Eintrag aus deinem Tresor:</label>
+          <select id="share-select-item" class="form-select"></select>
+        </div>
+        <button type="button" class="btn btn-primary" style="width: 100%; margin-top: 10px;" onclick="executeShareItem()">
+          Verschlüsselt senden
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: NOTFALL-KIT (EMERGENCY SHEET)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-emergency-kit">
+    <div class="modal-dialog" style="max-width: 650px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">📄</span>
+          <div>
+            <h3>sentinelbit Notfall-Kit</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Druckbares Sicherheits- und Wiederherstellungsblatt</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-emergency-kit')">✕</button>
+      </div>
+
+      <div id="emergency-kit-sheet" style="background: white; color: #0f172a; padding: 24px; border-radius: var(--radius-md); font-size: 0.9rem; line-height: 1.5; border: 2px solid #0f172a;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px;">
+          <div>
+            <h2 style="color: #0f172a; font-size: 1.4rem;">🛡️ sentinelbit Notfall-Kit</h2>
+            <p style="font-size: 0.8rem; color: #64748b;">Vertrauliches Sicherheitsdokument</p>
+          </div>
+          <div style="text-align: right; font-size: 0.75rem; color: #64748b;">
+            Erstellt am: <span id="kit-created-date"></span>
+          </div>
+        </div>
+
+        <p style="font-size: 0.85rem; margin-bottom: 14px;">
+          Dieses Dokument enthält alle kryptographischen Identifikatoren, um deinen Zero-Knowledge-Tresor im Notfall wiederherzustellen. Bewahre es an einem sicheren physischen Ort auf.
+        </p>
+
+        <div style="background: #f1f5f9; padding: 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85rem;">
+          <div style="margin-bottom: 6px;"><strong>Benutzername:</strong> <code id="kit-username" style="font-size: 1rem; color: #2563eb;"></code></div>
+          <div style="margin-bottom: 6px;"><strong>Tresor-Salt (Krypto-ID):</strong> <code id="kit-salt" style="font-size: 0.8rem; word-break: break-all;"></code></div>
+          <div><strong>Master-Passwort:</strong> __________________________________________ (Handschriftlich eintragen)</div>
+        </div>
+
+        <div id="kit-recovery-codes-box" style="margin-bottom: 14px;">
+          <strong style="color: #0f172a; font-size: 0.85rem;">2FA Notfall-Wiederherstellungscodes:</strong>
+          <div id="kit-recovery-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-family: monospace; font-size: 0.85rem; margin-top: 6px;"></div>
+        </div>
+
+        <div style="border-top: 1px dashed #cbd5e1; padding-top: 10px; font-size: 0.75rem; color: #64748b;">
+          <strong>Wiederherstellungsanleitung:</strong><br>
+          1. Starte sentinelbit und wähle „Konto wiederherstellen / importieren“.<br>
+          2. Gib deinen Benutzernamen und das oben notierte Master-Passwort ein.<br>
+          3. Sollte das Smartphone verloren sein, nutze einen der 2FA-Wiederherstellungscodes.
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-emergency-kit')">Schließen</button>
+        <button type="button" class="btn btn-primary" onclick="printEmergencyKit()">🖨️ Notfall-Kit drucken / als PDF speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: ACHIEVEMENTS & GAMIFICATION DETAILS
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-achievements">
+    <div class="modal-dialog" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🏆</span>
+          <div>
+            <h3>Sicherheits-Errungenschaften</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Meistere deine digitale Sicherheit und schalte Abzeichen frei</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-achievements')">✕</button>
+      </div>
+
+      <div id="achievements-full-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding-right: 4px;">
+        <!-- Populated via renderAchievementsModal() -->
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-achievements')">Verstanden</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: CLEANUP & DUPLICATE REMOVAL / VAULT RESET
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-cleanup">
+    <div class="modal-dialog" style="max-width: 680px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🧹</span>
+          <div>
+            <h3>Tresor-Bereinigung & Duplikate</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Doppelte Passwörter bereinigen oder Tresor für Neuimport leeren</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-cleanup')">✕</button>
+      </div>
+
+      <!-- Tab Buttons for Cleanup -->
+      <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px;">
+        <button type="button" class="btn btn-secondary active" id="tab-btn-duplicates" onclick="switchCleanupTab('duplicates')">
+          🔍 Duplikate finden
+        </button>
+        <button type="button" class="btn btn-secondary" id="tab-btn-wipe" onclick="switchCleanupTab('wipe')">
+          ⚠️ Tresor leeren (Reset)
+        </button>
+      </div>
+
+      <!-- Section 1: Duplicates -->
+      <div id="cleanup-duplicates-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-main);">
+              <input type="checkbox" id="cleanup-strict-mode" checked onchange="runDuplicateScan()">
+              Nur identische Klone (Gleiche URL + Benutzername + Passwort)
+            </label>
+            <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">
+              Wenn deaktiviert: Findet auch Einträge mit gleicher URL und Benutzername trotz unterschiedlicher Passwörter.
+            </p>
+          </div>
+          <button type="button" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="runDuplicateScan()">🔄 Neu scannen</button>
+        </div>
+
+        <div id="cleanup-scan-summary" style="margin-bottom: 14px;"></div>
+
+        <div id="cleanup-duplicates-list" style="max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; margin-bottom: 16px;">
+          <!-- Dynamically populated duplicate groups -->
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 14px; flex-wrap: wrap; gap: 10px;">
+          <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-dim);">
+            <input type="checkbox" id="cleanup-permanent-delete" checked> Endgültig löschen (nicht in Papierkorb)
+          </label>
+          <div style="display: flex; gap: 10px;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('modal-cleanup')">Schließen</button>
+            <button type="button" class="btn btn-primary" id="btn-execute-cleanup" onclick="executeRemoveDuplicates()">
+              🧹 Markierte Duplikate entfernen
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Vault Wipe (Reset) -->
+      <div id="cleanup-wipe-section" style="display: none;">
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-md); padding: 18px; margin-bottom: 20px;">
+          <h4 style="color: #ef4444; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+            <span>⚠️</span> Tresor vollständig leeren (Werkseinstellung)
+          </h4>
+          <p style="font-size: 0.85rem; color: var(--text-main); line-height: 1.5; margin-bottom: 12px;">
+            Diese Funktion löscht <strong>alle Einträge</strong> (Logins, Passkeys, Notizen, Zahlungskarten und Papierkorb) aus deinem sentinelbit-Konto.
+          </p>
+          <p style="font-size: 0.8rem; color: var(--text-dim); line-height: 1.4; margin-bottom: 16px;">
+            💡 <strong>Wann ist das nützlich?</strong><br>
+            Wenn du nach mehrmaligen Importen ein Durcheinander hast und deinen Bitwarden-Export noch einmal ganz sauber und frisch einspielen möchtest. Dein Benutzerkonto und dein Master-Passwort bleiben dabei erhalten.
+          </p>
+          <div style="margin-bottom: 14px;">
+            <label style="font-size: 0.8rem; color: var(--text-dim); display: block; margin-bottom: 6px;">
+              Tippe <code>LÖSCHEN</code> zur Bestätigung ein:
+            </label>
+            <input type="text" id="wipe-confirm-text" class="form-input" placeholder="LÖSCHEN" style="max-width: 200px; text-transform: uppercase;">
+          </div>
+          <button type="button" class="btn btn-danger" id="btn-wipe-vault" onclick="executeWipeVault()" style="width: 100%; padding: 10px; font-weight: 600;">
+            🗑️ Gesamten Tresor jetzt unwiderruflich leeren
+          </button>
+        </div>
+        <div class="modal-footer" style="padding: 0;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-cleanup')">Abbrechen</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: BROWSER EXTENSION SETUP & STATUS
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-extension">
+    <div class="modal-dialog" style="max-width: 620px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🧩</span>
+          <div>
+            <h3>sentinelbit Browser-Erweiterung</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Automatisches Ausfüllen, Passkeys & 2FA direkt im Browser</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-extension')">✕</button>
+      </div>
+
+      <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 600; color: #60a5fa; font-size: 0.95rem;" id="ext-modal-status-text">
+            Erweiterungs-Status: Bereit zum Koppeln
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 2px;">
+            Sobald die Erweiterung im Browser geladen ist, synchronisiert sie sich vollautomatisch mit deinem Tresor.
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" onclick="syncWithBrowserExtension(); showToast('Synchronisations-Signal gesendet!', 'info');" style="font-size: 0.8rem; padding: 6px 12px;">
+          🔄 Jetzt synchronisieren
+        </button>
+      </div>
+
+      <h4 style="margin-bottom: 10px; font-size: 0.95rem;">Installation in Chrome, Brave, Edge & Opera:</h4>
+      <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
+        <div style="display: flex; gap: 12px; align-items: flex-start; background: var(--bg-card); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+          <div style="font-weight: 700; color: #60a5fa; font-size: 1.1rem; width: 22px;">1</div>
+          <div>
+            Öffne die Erweiterungsseite deines Browsers (in die Adressleiste eingeben):<br>
+            <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #38bdf8;">chrome://extensions</code> bzw. <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #38bdf8;">edge://extensions</code>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: flex-start; background: var(--bg-card); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+          <div style="font-weight: 700; color: #60a5fa; font-size: 1.1rem; width: 22px;">2</div>
+          <div>
+            Aktiviere oben rechts den Schalter <strong>„Entwicklermodus“</strong> (Developer mode).
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: flex-start; background: var(--bg-card); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+          <div style="font-weight: 700; color: #60a5fa; font-size: 1.1rem; width: 22px;">3</div>
+          <div style="flex-grow: 1;">
+            Klicke oben links auf <strong>„Entpackte Erweiterung laden“</strong> und wähle diesen Ordner aus:<br>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+              <input type="text" readonly id="extension-folder-path" class="form-input" value="c:\Users\sebas\Documents\antigravity\joyful-curie\extension" style="font-family: monospace; font-size: 0.8rem; background: #000;">
+              <button type="button" class="btn btn-secondary" onclick="copyToClipboard(document.getElementById('extension-folder-path').value, 'Pfad kopiert!')" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap;">
+                📋 Pfad kopieren
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding-top: 10px;">
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-extension')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <script src="/static/app.js?v=3.1"></script>
+</body>
+</html>
+
