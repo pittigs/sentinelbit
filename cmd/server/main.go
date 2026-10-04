@@ -107,17 +107,7 @@ func httpError(w http.ResponseWriter, msg string, code int) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"detail": msg})
 }
 
-func main() {
-	// Initialize database
-	database, err := db.InitDB()
-	if err != nil {
-		log.Fatalf("Fatal: Database init failed: %v", err)
-	}
-
-	// Start background backup worker
-	backup.Engine.Start()
-	defer backup.Engine.Stop()
-
+func setupRouter(database *sql.DB) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Middlewares
@@ -211,6 +201,22 @@ func main() {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
 	})
+
+	return r
+}
+
+func main() {
+	// Initialize database
+	database, err := db.InitDB()
+	if err != nil {
+		log.Fatalf("Fatal: Database init failed: %v", err)
+	}
+
+	// Start background backup worker
+	backup.Engine.Start()
+	defer backup.Engine.Stop()
+
+	r := setupRouter(database)
 
 	port := os.Getenv("SENTINELBIT_PORT")
 	if port == "" {
@@ -793,7 +799,7 @@ func handleDeleteVaultItem(db *sql.DB) http.HandlerFunc {
 			jsonResponse(w, map[string]string{"status": "ok", "message": "Eintrag endgültig gelöscht"}, http.StatusOK)
 		} else {
 			now := time.Now().UTC().Format(time.RFC3339)
-			_, _ = db.Exec("UPDATE vault_items SET deleted_at = ? WHERE id = ?", now, itemId)
+			_, _ = db.Exec("UPDATE vault_items SET deleted_at = ? WHERE id = ? AND user_id = ?", now, itemId, user.UserId)
 			_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
 			jsonResponse(w, map[string]string{"status": "ok", "message": "Eintrag in den Papierkorb verschoben"}, http.StatusOK)
 		}

@@ -113,10 +113,17 @@ function isElementFillable(el) {
     }
   } catch (e) {}
 
-  // Check element rendering
+  // Check element rendering & anti-phishing trap detection (1px traps or offscreen traps)
   const rects = el.getClientRects();
   if (rects.length === 0 && !el.offsetParent) {
     return false;
+  }
+  const rect = el.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0 && (rect.width <= 2 || rect.height <= 2)) {
+    return false; // 1px trap defense
+  }
+  if (rect.bottom < -100 || rect.right < -100) {
+    return false; // Off-screen honeypot trap
   }
 
   return true;
