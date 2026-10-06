@@ -1,5 +1,5 @@
 # Multi-Stage Build: Kompiliert statisches Go-Binary für jede Plattform (x86_64, ARM64 / Pi 5)
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 WORKDIR /app
 
