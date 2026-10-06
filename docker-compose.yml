@@ -2,9 +2,10 @@ version: '3.8'
 
 services:
   sentinelbit:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/pittigs/sentinelbit:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: sentinelbit
     restart: unless-stopped
     ports:

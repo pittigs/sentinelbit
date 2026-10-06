@@ -67,16 +67,22 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 
 ## 🚀 Schnellstart
 
-### Methode 1: Docker (Empfohlen für Raspberry Pi 5 & Server)
+### Methode 1: 🐳 1-Klick Docker Run (Empfohlen für Raspberry Pi & Server)
 
-Das mitgelieferte Dockerfile unterstützt Multi-Architektur (`linux/arm64` und `linux/amd64`) inklusive Container-Healthcheck:
+Das fertige Multi-Architektur-Image unterstützt automatisch x86_64 (PC/Server) sowie ARM64 (Raspberry Pi 3/4/5) und kann ohne vorheriges Klonen direkt gestartet werden:
 
 ```bash
-# 1. Repository klonen
-git clone git@github.com:pittigs/sentinelbit.git
-cd sentinelbit
+docker run -d \
+  --name sentinelbit \
+  -p 8000:8000 \
+  -v ./data:/data \
+  --restart unless-stopped \
+  ghcr.io/pittigs/sentinelbit:latest
+```
 
-# 2. Container im Hintergrund starten
+Oder mit Docker Compose:
+
+```bash
 docker compose up -d
 ```
 
