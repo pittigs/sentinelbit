@@ -37,9 +37,12 @@ func InitDB() (*sql.DB, error) {
 			return
 		}
 
-		// Enable WAL mode for high concurrency
+		// Enable WAL mode for high concurrency & set busy timeout
 		_, _ = DB.Exec("PRAGMA journal_mode = WAL;")
 		_, _ = DB.Exec("PRAGMA foreign_keys = ON;")
+		_, _ = DB.Exec("PRAGMA busy_timeout = 5000;")
+		DB.SetMaxOpenConns(25)
+		DB.SetMaxIdleConns(5)
 
 		schema := `
 		CREATE TABLE IF NOT EXISTS users (
@@ -137,6 +140,11 @@ func InitDB() (*sql.DB, error) {
 			created_at TEXT NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
+
+		CREATE INDEX IF NOT EXISTS idx_vault_items_user_active ON vault_items(user_id, deleted_at, favorite);
+		CREATE INDEX IF NOT EXISTS idx_passkeys_user_active ON passkeys(user_id, deleted_at);
+		CREATE INDEX IF NOT EXISTS idx_shared_items_recipient ON shared_items(recipient_username);
+		CREATE INDEX IF NOT EXISTS idx_email_aliases_user ON email_aliases(user_id);
 		`
 
 		_, err = DB.Exec(schema)
@@ -161,6 +169,9 @@ func InitCustomDB(dbPath string) (*sql.DB, error) {
 
 	_, _ = customDB.Exec("PRAGMA journal_mode = WAL;")
 	_, _ = customDB.Exec("PRAGMA foreign_keys = ON;")
+	_, _ = customDB.Exec("PRAGMA busy_timeout = 5000;")
+	customDB.SetMaxOpenConns(25)
+	customDB.SetMaxIdleConns(5)
 
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
@@ -258,6 +269,11 @@ func InitCustomDB(dbPath string) (*sql.DB, error) {
 		created_at TEXT NOT NULL,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_vault_items_user_active ON vault_items(user_id, deleted_at, favorite);
+	CREATE INDEX IF NOT EXISTS idx_passkeys_user_active ON passkeys(user_id, deleted_at);
+	CREATE INDEX IF NOT EXISTS idx_shared_items_recipient ON shared_items(recipient_username);
+	CREATE INDEX IF NOT EXISTS idx_email_aliases_user ON email_aliases(user_id);
 	`
 
 	_, err = customDB.Exec(schema)

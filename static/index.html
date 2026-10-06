@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>sentinelbit - Zero-Knowledge Password & Passkey Manager</title>
+  <meta name="sentinelbit-vault" content="true">
   <link rel="stylesheet" href="/static/styles.css?v=2.7">
 </head>
 <body>
@@ -180,6 +181,11 @@
           <span class="badge badge-trash" id="count-trash">0</span>
         </div>
 
+        <div class="nav-label" style="margin-top: 14px;">Ordner</div>
+        <div id="sidebar-folder-list">
+          <div style="font-size: 0.75rem; color: var(--text-dim); padding: 4px 12px;">Keine Ordner angelegt</div>
+        </div>
+
         <div class="nav-label" style="margin-top: 14px;">Werkzeuge</div>
         <div class="nav-item" onclick="openGeneratorModal()" title="Passwort- & Passphrase-Generator">
           <div class="nav-item-content">
@@ -193,10 +199,10 @@
             <span class="nav-text">Passkey Labor</span>
           </div>
         </div>
-        <div class="nav-item" onclick="openAuditModal()" title="Sicherheits-Audit (HIBP Leak-Check)">
-          <div class="nav-item-content">
-            <span class="nav-icon">🔍</span>
-            <span class="nav-text">Sicherheits-Audit</span>
+        <div class="nav-item" onclick="openAuditModal()" title="Tresor-Gesundheit (Zero-Knowledge Audit)">
+          <div class="nav-item-content" style="color: #38bdf8;">
+            <span class="nav-icon">🛡️</span>
+            <span class="nav-text">Tresor-Gesundheit</span>
           </div>
         </div>
         <div class="nav-item" onclick="openBiometricModal()" title="Windows Hello / Biometrie">
@@ -263,9 +269,16 @@
       </div>
 
       <div class="sidebar-footer">
-        <div class="sidebar-footer-info">
+        <div class="sidebar-footer-info" style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 0.72rem; color: var(--text-dim);">Auto-Lock:</span>
-          <span style="font-size: 0.8rem; font-weight: 600; color: #60a5fa;" id="auto-lock-timer">15:00</span>
+          <select id="select-autolock" onchange="setAutoLockSetting(parseInt(this.value, 10))" style="background: rgba(255, 255, 255, 0.05); color: #60a5fa; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.72rem; font-weight: 600; cursor: pointer; outline: none; padding: 1px 4px;">
+            <option value="60">1m</option>
+            <option value="300" selected>5m</option>
+            <option value="900">15m</option>
+            <option value="1800">30m</option>
+            <option value="0">Nie</option>
+          </select>
+          <span style="font-size: 0.75rem; font-weight: 600; color: #60a5fa;" id="auto-lock-timer">05:00</span>
         </div>
         <button class="sidebar-lock-btn" onclick="lockVault()" title="Tresor sofort sperren">
           🔒
@@ -402,6 +415,12 @@
         <div class="form-group">
           <label for="item-title">Titel / Name</label>
           <input type="text" id="item-title" class="form-input" required placeholder="z. B. GitHub, Google, Amazon">
+        </div>
+
+        <div class="form-group">
+          <label for="item-folder">Ordner / Kategorie</label>
+          <input type="text" id="item-folder" list="folder-suggestions" class="form-input" placeholder="z. B. Privat, Arbeit, Finanzen (optional)">
+          <datalist id="folder-suggestions"></datalist>
         </div>
 
         <!-- Login specific fields -->
@@ -756,38 +775,52 @@
   </div>
 
   <!-- ============================================================
-       MODAL: SICHERHEITS-AUDIT & HIBP BREACH CHECK
+       MODAL: TRESOR-GESUNDHEIT & ZERO-KNOWLEDGE SICHERHEITS-AUDIT
   ============================================================ -->
   <div class="modal-overlay" id="modal-audit">
-    <div class="modal-dialog" style="max-width: 620px;">
+    <div class="modal-dialog" style="max-width: 740px; max-height: 88vh; display: flex; flex-direction: column;">
       <div class="modal-header">
         <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 1.5rem;">🔍</span>
+          <span style="font-size: 1.6rem;">🛡️</span>
           <div>
-            <h3>Tresor-Sicherheits-Audit & Datenleak-Check</h3>
-            <p style="font-size: 0.8rem; color: var(--text-dim);">Prüfung auf schwache Passwörter & HaveIBeenPwned (k-Anonymity)</p>
+            <h3>Tresor-Gesundheit & Sicherheits-Audit</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Zero-Knowledge Analyse: Schwache & wiederverwendete Passwörter, 2FA-Lücken & Datenlecks</p>
           </div>
         </div>
         <button class="btn-icon" onclick="closeModal('modal-audit')">✕</button>
       </div>
 
-      <div id="audit-results" style="font-size: 0.9rem;">
-        <!-- Filled by JS -->
-      </div>
-
-      <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <div>
-            <h4 style="font-size: 0.95rem; color: #f87171;">🛡️ HaveIBeenPwned Leak-Check</h4>
-            <p style="font-size: 0.78rem; color: var(--text-muted);">
-              Prüft, ob deine Passwörter in bekannten Leaks vorkommen. Durch k-Anonymity verlassen Passwörter niemals deinen Browser.
-            </p>
-          </div>
-          <button type="button" class="btn btn-secondary" id="btn-run-hibp" onclick="runHibpBreachCheck()">
-            Leak-Check starten
-          </button>
+      <div style="overflow-y: auto; padding-right: 4px; flex: 1;">
+        <!-- Health Score & Metrics Cards -->
+        <div id="audit-results" style="font-size: 0.9rem;">
+          <!-- Filled by JS -->
         </div>
-        <div id="hibp-results-container" style="display: none; margin-top: 12px; max-height: 180px; overflow-y: auto;"></div>
+
+        <!-- Category Filter Tabs -->
+        <div id="audit-tabs" style="display: flex; gap: 8px; margin: 16px 0 12px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; flex-wrap: wrap;">
+          <!-- Filled by JS -->
+        </div>
+
+        <!-- Actionable Issues List -->
+        <div id="audit-issue-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+          <!-- Filled by JS -->
+        </div>
+
+        <!-- HaveIBeenPwned Leak-Check Section -->
+        <div style="border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div>
+              <h4 style="font-size: 0.95rem; color: #f87171;">🔍 HaveIBeenPwned Leak-Check (k-Anonymity)</h4>
+              <p style="font-size: 0.78rem; color: var(--text-muted);">
+                Prüft via SHA-1 Prefix, ob Passwörter in bekannten Leaks vorkommen. Kein Passwort verlässt deinen Browser.
+              </p>
+            </div>
+            <button type="button" class="btn btn-secondary" id="btn-run-hibp" onclick="runHibpBreachCheck()">
+              Leak-Check starten
+            </button>
+          </div>
+          <div id="hibp-results-container" style="display: none; margin-top: 12px; max-height: 180px; overflow-y: auto;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1253,7 +1286,7 @@
           <div style="flex-grow: 1;">
             Klicke oben links auf <strong>„Entpackte Erweiterung laden“</strong> und wähle diesen Ordner aus:<br>
             <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
-              <input type="text" readonly id="extension-folder-path" class="form-input" value="c:\Users\sebas\Documents\antigravity\joyful-curie\extension" style="font-family: monospace; font-size: 0.8rem; background: #000;">
+              <input type="text" readonly id="extension-folder-path" class="form-input" value="./extension" style="font-family: monospace; font-size: 0.8rem; background: #000;">
               <button type="button" class="btn btn-secondary" onclick="copyToClipboard(document.getElementById('extension-folder-path').value, 'Pfad kopiert!')" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap;">
                 📋 Pfad kopieren
               </button>

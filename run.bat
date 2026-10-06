@@ -4,10 +4,21 @@ echo ========================================================
 echo   sentinelbit - Zero-Knowledge Password & Passkey Manager
 echo ========================================================
 echo.
-echo Starte Web-Server auf http://127.0.0.1:8000 ...
-echo Druecke Strg+C zum Beenden.
-echo.
 
-python -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+if exist sentinelbit.exe (
+    echo Starte sentinelbit Go Binary...
+    sentinelbit.exe
+) else if exist bin\sentinelbit.exe (
+    echo Starte sentinelbit Go Binary aus bin\...
+    bin\sentinelbit.exe
+) else if exist sentinelbit (
+    echo Starte sentinelbit Go Binary...
+    sentinelbit
+) else (
+    echo Kein kompiliertes Go-Binary gefunden.
+    echo Starte direkt mit 'go run ./cmd/server' ...
+    echo Druecke Strg+C zum Beenden.
+    echo.
+    go run ./cmd/server
+)
 pause
-

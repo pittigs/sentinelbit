@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI Server for SentinelBit Password Manager.
 Serves API endpoints and frontend single-page application.
 """
@@ -531,10 +531,22 @@ def restore_vault_item(item_id: str, user: Dict[str, Any] = Depends(get_current_
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute("UPDATE vault_items SET deleted_at = NULL WHERE id = ? AND user_id = ?", (item_id, user["user_id"]))
+    cursor.execute("UPDATE passkeys SET deleted_at = NULL WHERE vault_item_id = ? AND user_id = ?", (item_id, user["user_id"]))
     conn.commit()
     conn.close()
     backup_engine.trigger_on_change(user["user_id"])
     return {"status": "ok", "message": "Eintrag aus dem Papierkorb wiederhergestellt"}
+
+@app.delete("/api/vault/items/all")
+def clear_vault(user: Dict[str, Any] = Depends(get_current_user)):
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM vault_items WHERE user_id = ?", (user["user_id"],))
+    cursor.execute("DELETE FROM passkeys WHERE user_id = ?", (user["user_id"],))
+    conn.commit()
+    conn.close()
+    backup_engine.trigger_on_change(user["user_id"])
+    return {"status": "ok", "message": "Tresor wurde vollständig geleert"}
 
 @app.delete("/api/vault/items/{item_id}")
 def delete_vault_item(item_id: str, permanent: bool = False, user: Dict[str, Any] = Depends(get_current_user)):
@@ -558,6 +570,7 @@ def delete_vault_item(item_id: str, permanent: bool = False, user: Dict[str, Any
         # Soft delete (move to trash)
         now = datetime.now(timezone.utc).isoformat()
         cursor.execute("UPDATE vault_items SET deleted_at = ? WHERE id = ? AND user_id = ?", (now, item_id, user["user_id"]))
+        cursor.execute("UPDATE passkeys SET deleted_at = ? WHERE vault_item_id = ? AND user_id = ?", (now, item_id, user["user_id"]))
         conn.commit()
         conn.close()
         backup_engine.trigger_on_change(user["user_id"])
@@ -568,8 +581,10 @@ def empty_trash(user: Dict[str, Any] = Depends(get_current_user)):
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM vault_items WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", (user["user_id"],))
+    cursor.execute("DELETE FROM passkeys WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", (user["user_id"],))
     conn.commit()
     conn.close()
+    backup_engine.trigger_on_change(user["user_id"])
     return {"status": "ok", "message": "Papierkorb vollständig geleert"}
 
 # -------------------------------------------------------------

@@ -83,6 +83,104 @@ function bufferToStr(buf) {
   return new TextDecoder().decode(buf);
 }
 
+function bufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBuffer(b64) {
+  const binary = atob(b64.replace(/\s+/g, ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+function spkiToPem(buf) {
+  const b64 = bufferToBase64(buf);
+  const lines = b64.match(/.{1,64}/g) || [b64];
+  return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`;
+}
+
+function pemToSpki(pem) {
+  const clean = pem.replace(/-----BEGIN PUBLIC KEY-----/g, '')
+                   .replace(/-----END PUBLIC KEY-----/g, '')
+                   .replace(/\s+/g, '');
+  return base64ToBuffer(clean);
+}
+
+let userSharingPrivateKey = null;
+
+async function ensureUserSharingKey() {
+  if (!masterEncryptionKey || !currentUser) return null;
+  if (userSharingPrivateKey) return userSharingPrivateKey;
+
+  const storageKey = `SENTINELBIT_sharing_priv_${currentUser.username}`;
+  const storedEncPriv = localStorage.getItem(storageKey);
+
+  if (storedEncPriv) {
+    try {
+      const decPriv = await decryptPayload(storedEncPriv, masterEncryptionKey);
+      if (decPriv && decPriv.pkcs8) {
+        userSharingPrivateKey = await window.crypto.subtle.importKey(
+          "pkcs8",
+          hexToBuffer(decPriv.pkcs8),
+          { name: "RSA-OAEP", hash: "SHA-256" },
+          false,
+          ["decrypt"]
+        );
+        return userSharingPrivateKey;
+      }
+    } catch (e) {
+      console.warn("Failed to decrypt stored sharing private key, generating new one:", e);
+    }
+  }
+
+  // Generate new RSA-OAEP 2048 key pair
+  try {
+    const keyPair = await window.crypto.subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256"
+      },
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+    userSharingPrivateKey = keyPair.privateKey;
+
+    // Export & register public key
+    const spkiBuf = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
+    const pubPem = spkiToPem(spkiBuf);
+
+    await fetch("/api/share/public-key", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${sessionToken}`
+      },
+      body: JSON.stringify({ public_key_pem: pubPem })
+    });
+
+    // Export private key & encrypt with user's master key
+    const pkcs8Buf = await window.crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+    const encPrivPayload = await encryptPayload({ pkcs8: bufferToHex(pkcs8Buf) }, masterEncryptionKey);
+    localStorage.setItem(storageKey, encPrivPayload);
+
+    return userSharingPrivateKey;
+  } catch (err) {
+    console.error("Error creating sharing key pair:", err);
+    return null;
+  }
+}
+
 async function sha1Hex(str) {
   const buf = await window.crypto.subtle.digest("SHA-1", strToBuffer(str));
   return bufferToHex(buf).toUpperCase();
@@ -381,6 +479,17 @@ async function handleBiometricUnlock() {
       ["encrypt", "decrypt"]
     );
 
+    // Verify that session token is still valid on server
+    const authCheck = await fetch("/api/auth/me", {
+      headers: { "Authorization": `Bearer ${sessionToken}` }
+    });
+    if (!authCheck.ok) {
+      document.getElementById("login-username").value = bioData.username || "";
+      showToast("Server-Sitzung ist abgelaufen. Bitte Master-Passwort eingeben.", "warning");
+      document.getElementById("login-password").focus();
+      return;
+    }
+
     // Switch to Dashboard
     document.getElementById("auth-container").style.display = "none";
     document.getElementById("app-container").style.display = "flex";
@@ -393,6 +502,7 @@ async function handleBiometricUnlock() {
     startAutoLockTimer();
     startTotpRefreshLoop();
     await loadVault();
+    ensureUserSharingKey();
 
     showToast("Erfolgreich mit Windows Hello entsperrt! 🖐️", "success");
   } catch (err) {
@@ -686,6 +796,7 @@ async function handleLogin(e) {
     startAutoLockTimer();
     startTotpRefreshLoop();
     await loadVault();
+    ensureUserSharingKey();
 
     showToast("Tresor erfolgreich entsperrt!", "success");
   } catch (err) {
@@ -725,12 +836,44 @@ function lockVault() {
   showToast("Tresor wurde gesperrt.", "info");
 }
 
+function getAutoLockSetting() {
+  const saved = localStorage.getItem("sentinelbit_autolock_sec");
+  if (saved !== null) {
+    const val = parseInt(saved, 10);
+    if (!isNaN(val)) return val;
+  }
+  return 300; // 5 min default
+}
+
+function setAutoLockSetting(sec) {
+  localStorage.setItem("sentinelbit_autolock_sec", sec);
+  const select = document.getElementById("select-autolock");
+  if (select) select.value = String(sec);
+  startAutoLockTimer();
+  showToast(sec === 0 ? "Auto-Lock deaktiviert." : `Auto-Lock auf ${Math.round(sec / 60)} Min. gesetzt.`, "info");
+}
+
 function startAutoLockTimer() {
-  remainingLockSeconds = AUTO_LOCK_SECONDS;
+  const timeoutSec = getAutoLockSetting();
+  const select = document.getElementById("select-autolock");
+  if (select && select.value !== String(timeoutSec)) {
+    select.value = String(timeoutSec);
+  }
+
   if (lockInterval) clearInterval(lockInterval);
 
+  if (timeoutSec <= 0) {
+    const timerEl = document.getElementById("auto-lock-timer");
+    if (timerEl) timerEl.innerText = "∞";
+    window.onmousemove = null;
+    window.onkeydown = null;
+    window.onclick = null;
+    return;
+  }
+
+  remainingLockSeconds = timeoutSec;
   const resetTimer = () => {
-    remainingLockSeconds = AUTO_LOCK_SECONDS;
+    remainingLockSeconds = timeoutSec;
   };
   window.onmousemove = resetTimer;
   window.onkeydown = resetTimer;
@@ -843,6 +986,7 @@ async function updateItemCounters() {
       }
     }
     updateSecurityGamification();
+    renderSidebarFolders();
 
     // Duplicate badge calculation
     try {
@@ -890,7 +1034,7 @@ function syncWithBrowserExtension() {
       action: "SYNC_VAULT",
       items: cacheItems,
       user: currentUser ? currentUser.username : ""
-    }, "*");
+    }, window.location.origin);
   } catch (e) {
     console.debug("Extension sync bridge error:", e);
   }
@@ -1066,6 +1210,9 @@ function switchTab(tab) {
   const navItem = document.querySelector(`.nav-item[onclick*="'${tab}'"]`);
   if (navItem) navItem.classList.add("active");
 
+  // Deselect any active folder in sidebar
+  document.querySelectorAll("#sidebar-folder-list .nav-item").forEach(el => el.classList.remove("active"));
+
   // Synchronize quick filter pills
   document.querySelectorAll(".filter-pill").forEach(el => {
     if (el.getAttribute("onclick") && el.getAttribute("onclick").includes(`'${tab}'`)) {
@@ -1089,6 +1236,53 @@ function switchTab(tab) {
   renderVaultItems();
 }
 
+function renderSidebarFolders() {
+  const container = document.getElementById("sidebar-folder-list");
+  const datalist = document.getElementById("folder-suggestions");
+  if (!container) return;
+
+  const folderCounts = {};
+  decryptedItems.forEach(i => {
+    if (i.folder && i.folder.trim()) {
+      const f = i.folder.trim();
+      folderCounts[f] = (folderCounts[f] || 0) + 1;
+    }
+  });
+
+  const folders = Object.keys(folderCounts).sort();
+
+  if (datalist) {
+    datalist.innerHTML = folders.map(f => `<option value="${escapeHtml(f)}">`).join("");
+  }
+
+  if (folders.length === 0) {
+    container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-dim); padding: 4px 12px;">Keine Ordner angelegt</div>`;
+    return;
+  }
+
+  container.innerHTML = folders.map(f => `
+    <div class="nav-item ${activeTab === 'folder:' + f ? 'active' : ''}" onclick="switchFolder('${escapeHtml(f)}')" title="Ordner: ${escapeHtml(f)}">
+      <div class="nav-item-content">
+        <span class="nav-icon">📁</span>
+        <span class="nav-text">${escapeHtml(f)}</span>
+      </div>
+      <span class="badge">${folderCounts[f]}</span>
+    </div>
+  `).join("");
+}
+
+function switchFolder(folderName) {
+  activeTab = 'folder:' + folderName;
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+  const navItems = Array.from(document.querySelectorAll("#sidebar-folder-list .nav-item"));
+  const match = navItems.find(el => el.innerText.includes(folderName));
+  if (match) match.classList.add("active");
+
+  document.querySelectorAll(".filter-pill").forEach(el => el.classList.remove("active"));
+  document.getElementById("current-view-title").innerText = `Ordner: ${folderName}`;
+  renderVaultItems();
+}
+
 function filterVaultItems() {
   renderVaultItems();
 }
@@ -1108,6 +1302,9 @@ function extractDomain(urlStr) {
 }
 
 function getFaviconUrl(urlStr) {
+  if (localStorage.getItem("SENTINELBIT_disable_external_favicons") === "true") {
+    return null;
+  }
   const domain = extractDomain(urlStr);
   if (!domain) return null;
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
@@ -1198,6 +1395,7 @@ async function renderVaultItems() {
     if (activeTab === 'card' && item.type !== 'card') return false;
     if (activeTab === 'favorite' && !item.favorite) return false;
     if (activeTab === 'totp' && (!item.data || !item.data.totp)) return false;
+    if (activeTab.startsWith('folder:') && item.folder !== activeTab.substring(7)) return false;
 
     if (query) {
       const matchTitle = item.title.toLowerCase().includes(query);
@@ -1316,7 +1514,10 @@ async function renderVaultItems() {
       <div class="card-main-col">
         ${iconHtml}
         <div class="card-title-group">
-          <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+          <div class="card-title" title="${escapeHtml(item.title)}">
+            ${escapeHtml(item.title)}
+            ${item.folder ? `<span class="badge" style="font-size: 0.68rem; margin-left: 6px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500;">📁 ${escapeHtml(item.folder)}</span>` : ''}
+          </div>
           <div class="card-subtitle" title="${escapeHtml(item.data.url || item.folder || '')}">${escapeHtml(item.data.url || item.folder || 'Keine URL')}</div>
         </div>
       </div>
@@ -1427,7 +1628,7 @@ async function copyTotpCode(itemId) {
   if (item && item.data.totp) {
     const res = await computeTotp(item.data.totp);
     if (res) {
-      copyToClipboard(res.code, "2FA-Code kopiert!");
+      copyToClipboard(res.code, "2FA-Code kopiert! (Leert in 30s)", true);
     }
   }
 }
@@ -1472,6 +1673,7 @@ function openAddItemModal() {
   document.getElementById("item-id").value = "";
   document.getElementById("item-type").value = "login";
   document.getElementById("item-title").value = "";
+  document.getElementById("item-folder").value = "";
   document.getElementById("item-url").value = "";
   document.getElementById("item-username").value = "";
   document.getElementById("item-password").value = "";
@@ -1502,6 +1704,7 @@ function openEditItemModal(id) {
   document.getElementById("item-id").value = item.id;
   document.getElementById("item-type").value = item.type;
   document.getElementById("item-title").value = item.title;
+  document.getElementById("item-folder").value = item.folder || "";
   document.getElementById("item-favorite").checked = item.favorite;
 
   toggleItemTypeFields(item.type);
@@ -1577,7 +1780,7 @@ function togglePasswordHistoryView(e) {
 function copyHistoryPassword(idx) {
   const h = currentItemPasswordHistory[idx];
   if (h && h.password) {
-    copyToClipboard(h.password, "Altes Passwort kopiert!");
+    copyToClipboard(h.password, "Altes Passwort kopiert! (Leert in 30s)", true);
   }
 }
 
@@ -1697,6 +1900,7 @@ async function saveVaultItem(e) {
       body: JSON.stringify({
         type: type,
         title: title,
+        folder: document.getElementById("item-folder").value.trim(),
         favorite: favorite,
         encrypted_payload: encryptedPayload
       })
@@ -1804,7 +2008,7 @@ function copyItemUsername(id) {
 function copyItemPassword(id) {
   const item = decryptedItems.find(i => i.id === id);
   if (item && item.data && item.data.password) {
-    copyToClipboard(item.data.password, "Passwort kopiert!");
+    copyToClipboard(item.data.password, "Passwort kopiert! (Leert in 30s)", true);
   }
 }
 
@@ -2175,39 +2379,346 @@ function togglePasswordVisibility(fieldId) {
 // AUDIT & HAVEIBEENPWNED (k-Anonymity)
 // =============================================================
 
-function openAuditModal() {
-  const container = document.getElementById("audit-results");
-  const passwords = [];
-  let weakCount = 0;
+let currentAuditState = {
+  total: 0,
+  score: 100,
+  reused: [],     // [{ item, count, pwd }]
+  weak: [],       // [{ item, reason }]
+  missing2fa: [], // [{ item }]
+  old: [],        // [{ item, ageDays, reason }]
+  leaked: [],     // [{ item, count }]
+  activeFilter: "all"
+};
 
-  decryptedItems.forEach(it => {
-    if (it.type === "login" && it.data.password) {
-      passwords.push({ id: it.id, title: it.title, pwd: it.data.password });
-      if (it.data.password.length < 12) weakCount++;
+function editAuditItem(id) {
+  closeModal("modal-audit");
+  openEditItemModal(id);
+}
+
+function setAuditFilter(filter) {
+  currentAuditState.activeFilter = filter;
+  renderAuditFilterTabs();
+  renderAuditIssueList();
+}
+
+function openAuditModal() {
+  const logins = decryptedItems.filter(it => it.type === "login" && !it.trash);
+  const passwordsMap = {};
+  const weakList = [];
+  const missing2faList = [];
+  const oldList = [];
+  const now = new Date();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+  const commonPasswords = new Set([
+    "123456", "password", "12345678", "qwerty", "123456789", "12345", "1234", "111111",
+    "1234567", "dragon", "123123", "baseball", "football", "master", "welcome", "qwertz",
+    "admin", "passwort", "geheim", "hallo123", "schatz"
+  ]);
+
+  logins.forEach(it => {
+    const pwd = (it.data && it.data.password) ? String(it.data.password) : "";
+    if (pwd) {
+      if (!passwordsMap[pwd]) passwordsMap[pwd] = [];
+      passwordsMap[pwd].push(it);
+
+      // Check weakness
+      let isWeak = false;
+      let reason = "";
+      if (pwd.length < 12) {
+        isWeak = true;
+        reason = `Nur ${pwd.length} Zeichen (mindestens 12 empfohlen)`;
+      } else if (commonPasswords.has(pwd.toLowerCase())) {
+        isWeak = true;
+        reason = "Häufig verwendetes Standard-Passwort";
+      } else {
+        const hasUpper = /[A-Z]/.test(pwd);
+        const hasLower = /[a-z]/.test(pwd);
+        const hasDigit = /[0-9]/.test(pwd);
+        const hasSpecial = /[^A-Za-z0-9]/.test(pwd);
+        const diversity = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
+        if (diversity < 3) {
+          isWeak = true;
+          reason = "Geringe Zeichenvielfalt (fehlen Groß-/Kleinbuchstaben, Zahlen oder Symbole)";
+        }
+      }
+
+      if (isWeak) {
+        weakList.push({ item: it, reason });
+      }
+
+      // Check password age (older than 180 days)
+      const dateStr = it.updated_at || it.created_at;
+      if (dateStr) {
+        const itemDate = new Date(dateStr);
+        const diffMs = now - itemDate;
+        const ageDays = Math.floor(diffMs / ONE_DAY_MS);
+        if (ageDays >= 180) {
+          oldList.push({
+            item: it,
+            ageDays: ageDays,
+            reason: `Passwort seit ${ageDays} Tagen nicht geändert (über 6 Monate)`
+          });
+        }
+      }
+    }
+
+    // Check missing 2FA
+    if (!it.data || !it.data.totp) {
+      missing2faList.push({ item: it });
     }
   });
 
-  const counts = {};
-  passwords.forEach(p => {
-    counts[p.pwd] = (counts[p.pwd] || 0) + 1;
+  // Reused passwords
+  const reusedList = [];
+  Object.keys(passwordsMap).forEach(pwd => {
+    if (passwordsMap[pwd].length > 1) {
+      passwordsMap[pwd].forEach(item => {
+        reusedList.push({
+          item,
+          count: passwordsMap[pwd].length,
+          pwd
+        });
+      });
+    }
   });
-  const reusedCount = passwords.filter(p => counts[p.pwd] > 1).length;
+
+  // Calculate Health Score (0-100)
+  let score = 100;
+  if (logins.length > 0) {
+    const reusedGroups = Object.keys(passwordsMap).filter(p => passwordsMap[p].length > 1).length;
+    score -= Math.min(35, reusedGroups * 10);
+    score -= Math.min(30, weakList.length * 8);
+    score -= Math.min(15, Math.floor(missing2faList.length * 1.5));
+    score -= Math.min(10, Math.floor(oldList.length * 2));
+    if (currentAuditState.leaked.length > 0) {
+      score -= Math.min(30, currentAuditState.leaked.length * 15);
+    }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  currentAuditState.total = logins.length;
+  currentAuditState.score = score;
+  currentAuditState.reused = reusedList;
+  currentAuditState.weak = weakList;
+  currentAuditState.missing2fa = missing2faList;
+  currentAuditState.old = oldList;
+  currentAuditState.activeFilter = "all";
+
+  renderAuditOverview();
+  renderAuditFilterTabs();
+  renderAuditIssueList();
+
+  openModal("modal-audit");
+}
+
+function renderAuditOverview() {
+  const container = document.getElementById("audit-results");
+  const s = currentAuditState;
+
+  let scoreColor = "var(--color-success)";
+  let scoreBadge = "Hervorragend";
+  let scoreGlow = "rgba(16, 185, 129, 0.2)";
+  if (s.score < 60) {
+    scoreColor = "var(--color-danger)";
+    scoreBadge = "Kritisch";
+    scoreGlow = "rgba(244, 63, 94, 0.25)";
+  } else if (s.score < 85) {
+    scoreColor = "var(--color-warning)";
+    scoreBadge = "Verbesserungswürdig";
+    scoreGlow = "rgba(245, 158, 11, 0.2)";
+  }
 
   container.innerHTML = `
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
-      <div style="background: var(--bg-card); padding: 14px; border-radius: var(--radius-md); text-align: center;">
-        <div style="font-size: 1.8rem; font-weight: 700; color: ${weakCount > 0 ? 'var(--color-danger)' : 'var(--color-success)'};">${weakCount}</div>
-        <div style="font-size: 0.8rem; color: var(--text-dim);">Kurze Passwörter (&lt;12)</div>
+    <div style="background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div style="width: 72px; height: 72px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: ${scoreGlow}; border: 3px solid ${scoreColor}; box-shadow: 0 0 20px ${scoreGlow};">
+            <span style="font-size: 1.5rem; font-weight: 800; color: ${scoreColor}; line-height: 1;">${s.score}</span>
+            <span style="font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; font-weight: 700;">Score</span>
+          </div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h4 style="font-size: 1.1rem; margin: 0;">Tresor-Sicherheitslevel</h4>
+              <span class="badge" style="background: ${scoreGlow}; color: ${scoreColor}; border: 1px solid ${scoreColor}; font-weight: 700; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px;">
+                ${scoreBadge}
+              </span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin: 4px 0 0 0;">
+              ${s.total} Login-Einträge lokal analysiert. Keine Klartextdaten verlassen den Browser.
+            </p>
+          </div>
+        </div>
       </div>
-      <div style="background: var(--bg-card); padding: 14px; border-radius: var(--radius-md); text-align: center;">
-        <div style="font-size: 1.8rem; font-weight: 700; color: ${reusedCount > 0 ? 'var(--color-warning)' : 'var(--color-success)'};">${reusedCount}</div>
-        <div style="font-size: 0.8rem; color: var(--text-dim);">Wiederverwendete Passwörter</div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); gap: 10px; margin-top: 16px;">
+        <div onclick="setAuditFilter('reused')" style="cursor: pointer; background: var(--bg-card); border: 1px solid ${s.reused.length > 0 ? 'rgba(245, 158, 11, 0.4)' : 'var(--border-color)'}; padding: 10px; border-radius: var(--radius-md); text-align: center; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+          <div style="font-size: 1.35rem; font-weight: 800; color: ${s.reused.length > 0 ? 'var(--color-warning)' : 'var(--color-success)'};">${s.reused.length}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600;">Wiederverwendet</div>
+        </div>
+        <div onclick="setAuditFilter('weak')" style="cursor: pointer; background: var(--bg-card); border: 1px solid ${s.weak.length > 0 ? 'rgba(244, 63, 94, 0.4)' : 'var(--border-color)'}; padding: 10px; border-radius: var(--radius-md); text-align: center; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+          <div style="font-size: 1.35rem; font-weight: 800; color: ${s.weak.length > 0 ? 'var(--color-danger)' : 'var(--color-success)'};">${s.weak.length}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600;">Schwache Passwörter</div>
+        </div>
+        <div onclick="setAuditFilter('old')" style="cursor: pointer; background: var(--bg-card); border: 1px solid ${s.old.length > 0 ? 'rgba(251, 191, 36, 0.4)' : 'var(--border-color)'}; padding: 10px; border-radius: var(--radius-md); text-align: center; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+          <div style="font-size: 1.35rem; font-weight: 800; color: ${s.old.length > 0 ? '#fbbf24' : 'var(--color-success)'};">${s.old.length}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600;">Veraltet (&gt;6 Mo.)</div>
+        </div>
+        <div onclick="setAuditFilter('2fa')" style="cursor: pointer; background: var(--bg-card); border: 1px solid var(--border-color); padding: 10px; border-radius: var(--radius-md); text-align: center; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+          <div style="font-size: 1.35rem; font-weight: 800; color: #38bdf8;">${s.missing2fa.length}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600;">Ohne 2FA (TOTP)</div>
+        </div>
+        <div onclick="setAuditFilter('leaked')" style="cursor: pointer; background: var(--bg-card); border: 1px solid ${s.leaked.length > 0 ? 'rgba(244, 63, 94, 0.5)' : 'var(--border-color)'}; padding: 10px; border-radius: var(--radius-md); text-align: center; transition: transform 0.2s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'">
+          <div style="font-size: 1.35rem; font-weight: 800; color: ${s.leaked.length > 0 ? 'var(--color-danger)' : 'var(--text-dim)'};">${s.leaked.length}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600;">In Leaks (HIBP)</div>
+        </div>
       </div>
     </div>
   `;
+}
 
-  document.getElementById("hibp-results-container").style.display = "none";
-  openModal("modal-audit");
+function renderAuditFilterTabs() {
+  const tabsContainer = document.getElementById("audit-tabs");
+  const s = currentAuditState;
+
+  const tabs = [
+    { id: "all", label: `Alle Meldungen (${s.reused.length + s.weak.length + s.old.length + s.leaked.length})` },
+    { id: "reused", label: `Wiederverwendet (${s.reused.length})` },
+    { id: "weak", label: `Schwach (${s.weak.length})` },
+    { id: "old", label: `Veraltet (${s.old.length})` },
+    { id: "2fa", label: `Fehlende 2FA (${s.missing2fa.length})` },
+    { id: "leaked", label: `Datenlecks (${s.leaked.length})` }
+  ];
+
+  tabsContainer.innerHTML = tabs.map(t => `
+    <button type="button" class="btn btn-sm ${s.activeFilter === t.id ? 'btn-primary' : 'btn-secondary'}" onclick="setAuditFilter('${t.id}')" style="font-size: 0.78rem; padding: 4px 10px; border-radius: 999px;">
+      ${t.label}
+    </button>
+  `).join("");
+}
+
+function renderAuditIssueList() {
+  const listContainer = document.getElementById("audit-issue-list");
+  const s = currentAuditState;
+  const filter = s.activeFilter;
+
+  // Aggregate items with issues
+  const itemMap = new Map();
+
+  if (filter === "all" || filter === "reused") {
+    s.reused.forEach(r => {
+      const it = r.item;
+      if (!itemMap.has(it.id)) itemMap.set(it.id, { item: it, issues: [] });
+      itemMap.get(it.id).issues.push({
+        type: "reused",
+        badge: "Wiederverwendet",
+        color: "#f59e0b",
+        bg: "rgba(245, 158, 11, 0.15)",
+        detail: `Passwort wird von ${r.count} Konten geteilt`
+      });
+    });
+  }
+
+  if (filter === "all" || filter === "weak") {
+    s.weak.forEach(w => {
+      const it = w.item;
+      if (!itemMap.has(it.id)) itemMap.set(it.id, { item: it, issues: [] });
+      itemMap.get(it.id).issues.push({
+        type: "weak",
+        badge: "Schwach",
+        color: "#f43f5e",
+        bg: "rgba(244, 63, 94, 0.15)",
+        detail: w.reason
+      });
+    });
+  }
+
+  if (filter === "all" || filter === "old") {
+    s.old.forEach(o => {
+      const it = o.item;
+      if (!itemMap.has(it.id)) itemMap.set(it.id, { item: it, issues: [] });
+      itemMap.get(it.id).issues.push({
+        type: "old",
+        badge: "Veraltet",
+        color: "#fbbf24",
+        bg: "rgba(251, 191, 36, 0.15)",
+        detail: o.reason
+      });
+    });
+  }
+
+  if (filter === "2fa") {
+    s.missing2fa.forEach(m => {
+      const it = m.item;
+      if (!itemMap.has(it.id)) itemMap.set(it.id, { item: it, issues: [] });
+      itemMap.get(it.id).issues.push({
+        type: "2fa",
+        badge: "Kein 2FA",
+        color: "#38bdf8",
+        bg: "rgba(56, 189, 248, 0.15)",
+        detail: "Zwei-Faktor-Authentifizierung (TOTP) nicht eingerichtet"
+      });
+    });
+  }
+
+  if (filter === "all" || filter === "leaked") {
+    s.leaked.forEach(l => {
+      const it = l.item;
+      if (!itemMap.has(it.id)) itemMap.set(it.id, { item: it, issues: [] });
+      itemMap.get(it.id).issues.push({
+        type: "leaked",
+        badge: "Datenleak!",
+        color: "#f43f5e",
+        bg: "rgba(244, 63, 94, 0.25)",
+        detail: `In öffentlichen Datenlecks gefunden (${l.count.toLocaleString()}x)`
+      });
+    });
+  }
+
+  const entries = Array.from(itemMap.values());
+
+  if (entries.length === 0) {
+    listContainer.innerHTML = `
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 24px; text-align: center; color: var(--color-success);">
+        <div style="font-size: 2rem; margin-bottom: 8px;">🎉</div>
+        <div style="font-weight: 700; font-size: 0.95rem;">Keine Probleme in dieser Kategorie gefunden!</div>
+        <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">Deine Passwörter entsprechen in diesem Bereich den Best-Practice-Sicherheitsstandards.</div>
+      </div>
+    `;
+    return;
+  }
+
+  listContainer.innerHTML = entries.map(e => {
+    const it = e.item;
+    const username = (it.data && it.data.username) ? escapeHtml(it.data.username) : "Kein Benutzername";
+    const url = (it.data && it.data.url) ? escapeHtml(it.data.url) : "";
+
+    return `
+      <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-weight: 700; font-size: 0.92rem; color: var(--text-main);">${escapeHtml(it.title)}</span>
+            ${e.issues.map(iss => `
+              <span style="background: ${iss.bg}; color: ${iss.color}; font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 999px; border: 1px solid ${iss.color};">
+                ${iss.badge}
+              </span>
+            `).join("")}
+          </div>
+          <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 3px; display: flex; gap: 10px; align-items: center;">
+            <span>👤 ${username}</span>
+            ${url ? `<span>🌐 ${url}</span>` : ""}
+          </div>
+          <div style="margin-top: 4px; font-size: 0.76rem; color: var(--text-muted);">
+            ${e.issues.map(iss => `<div>• ${escapeHtml(iss.detail)}</div>`).join("")}
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-secondary btn-sm" onclick="editAuditItem('${it.id}')" style="white-space: nowrap; font-size: 0.78rem; padding: 6px 12px;">
+          🔧 Bearbeiten
+        </button>
+      </div>
+    `;
+  }).join("");
 }
 
 async function runHibpBreachCheck() {
@@ -2222,7 +2733,7 @@ async function runHibpBreachCheck() {
   let checkedCount = 0;
 
   for (const item of decryptedItems) {
-    if (item.type === "login" && item.data.password) {
+    if (item.type === "login" && item.data && item.data.password && !item.trash) {
       checkedCount++;
       try {
         const hash = await sha1Hex(item.data.password);
@@ -2237,9 +2748,11 @@ async function runHibpBreachCheck() {
           for (const line of lines) {
             const parts = line.trim().split(":");
             if (parts[0].toUpperCase() === suffix) {
+              const count = parseInt(parts[1], 10);
               breaches.push({
+                item: item,
                 title: item.title,
-                count: parseInt(parts[1], 10)
+                count: count
               });
               break;
             }
@@ -2254,6 +2767,8 @@ async function runHibpBreachCheck() {
   btn.disabled = false;
   btn.innerText = "Erneut prüfen";
 
+  currentAuditState.leaked = breaches;
+
   if (breaches.length === 0) {
     resContainer.innerHTML = `
       <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 12px; font-size: 0.85rem; color: #34d399;">
@@ -2266,13 +2781,21 @@ async function runHibpBreachCheck() {
         ⚠️ Warnung: ${breaches.length} Passwort(e) wurden in öffentlichen Datenlecks gefunden!
       </div>
       ${breaches.map(b => `
-        <div class="card-row" style="margin-bottom: 4px;">
+        <div class="card-row" style="margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 600;">${escapeHtml(b.title)}</span>
-          <span style="color: #f87171; font-weight: 700; font-size: 0.8rem;">${b.count.toLocaleString()}x in Leaks gesehen</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: #f87171; font-weight: 700; font-size: 0.8rem;">${b.count.toLocaleString()}x in Leaks gesehen</span>
+            <button class="btn btn-secondary btn-sm" onclick="editAuditItem('${b.item.id}')" style="font-size: 0.72rem; padding: 2px 8px;">Ändern</button>
+          </div>
         </div>
       `).join('')}
     `;
   }
+
+  // Recalculate score and refresh issue lists
+  renderAuditOverview();
+  renderAuditFilterTabs();
+  renderAuditIssueList();
 }
 
 // =============================================================
@@ -2777,9 +3300,34 @@ function showToast(message, type = "info") {
   }, 3500);
 }
 
-function copyToClipboard(text, successMsg) {
+let clipboardClearTimer = null;
+
+function copyToClipboard(text, successMsg, isSensitive = false) {
+  if (!text) return;
   navigator.clipboard.writeText(text).then(() => {
     showToast(successMsg || "In die Zwischenablage kopiert!", "success");
+
+    // Auto-clear sensitive passwords and TOTP codes after 30 seconds
+    if (isSensitive) {
+      if (clipboardClearTimer) clearTimeout(clipboardClearTimer);
+      clipboardClearTimer = setTimeout(async () => {
+        try {
+          const current = await navigator.clipboard.readText();
+          if (current === text) {
+            await navigator.clipboard.writeText("");
+            showToast("🛡️ Zwischenablage nach 30s automatisch geleert.", "info");
+          }
+        } catch (_) {
+          // Fallback if readText is blocked by browser policy
+          navigator.clipboard.writeText("").then(() => {
+            showToast("🛡️ Zwischenablage aus Sicherheitsgründen geleert.", "info");
+          }).catch(() => {});
+        }
+      }, 30000);
+    }
+  }).catch(err => {
+    console.error("Clipboard copy error:", err);
+    showToast("Kopieren fehlgeschlagen.", "error");
   });
 }
 
@@ -3070,6 +3618,11 @@ async function executeShareItem() {
     return;
   }
 
+  if (currentUser && targetUser === currentUser.username.toLowerCase()) {
+    showToast("Du kannst Einträge nicht mit dir selbst teilen.", "warning");
+    return;
+  }
+
   const item = decryptedItems.find(i => i.id === itemId);
   if (!item) {
     showToast("Ausgewählter Eintrag nicht gefunden.", "error");
@@ -3077,8 +3630,58 @@ async function executeShareItem() {
   }
 
   try {
-    // Re-encrypt payload for recipient or sharing channel
-    const sharedPayloadStr = await encryptPayload(item.data, masterEncryptionKey);
+    showToast(`Rufe Schlüssel von '${targetUser}' ab...`, "info");
+
+    // 1. Fetch recipient's public key
+    const keyRes = await fetch(`/api/share/user/${targetUser}/public-key`, {
+      headers: { "Authorization": `Bearer ${sessionToken}` }
+    });
+    const keyData = await keyRes.json();
+    if (!keyRes.ok) {
+      throw new Error(keyData.detail || `Empfänger '${targetUser}' hat noch keinen Sharing-Schlüssel aktiviert.`);
+    }
+
+    // 2. Import recipient's RSA-OAEP public key
+    const spkiBuffer = pemToSpki(keyData.public_key_pem);
+    const recipientPubKey = await window.crypto.subtle.importKey(
+      "spki",
+      spkiBuffer,
+      { name: "RSA-OAEP", hash: "SHA-256" },
+      false,
+      ["encrypt"]
+    );
+
+    // 3. Generate random ephemeral AES-256-GCM symmetric key
+    const ephemeralKey = await window.crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+    // 4. Encrypt item plaintext data with ephemeral AES key
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const plaintext = strToBuffer(JSON.stringify(item.data));
+    const cipherBuf = await window.crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv },
+      ephemeralKey,
+      plaintext
+    );
+
+    // 5. Encrypt ephemeral AES key with recipient's RSA-OAEP public key
+    const rawKeyBytes = await window.crypto.subtle.exportKey("raw", ephemeralKey);
+    const encKeyBuf = await window.crypto.subtle.encrypt(
+      { name: "RSA-OAEP" },
+      recipientPubKey,
+      rawKeyBytes
+    );
+
+    // 6. Build Zero-Knowledge E2E envelope
+    const e2ePayload = JSON.stringify({
+      version: "e2e_rsa_v1",
+      enc_key: bufferToHex(encKeyBuf),
+      iv: bufferToHex(iv),
+      data: bufferToHex(cipherBuf)
+    });
 
     const res = await fetch("/api/share/send", {
       method: "POST",
@@ -3090,7 +3693,7 @@ async function executeShareItem() {
         recipient_username: targetUser,
         type: item.type,
         title: item.title,
-        encrypted_payload: sharedPayloadStr
+        encrypted_payload: e2ePayload
       })
     });
 
@@ -3107,7 +3710,57 @@ async function executeShareItem() {
 
 async function importSharedItemIntoVault(sharedId, title, type, encryptedPayload) {
   try {
-    await fetch("/api/vault/items", {
+    await ensureUserSharingKey();
+
+    let decryptedItemData = null;
+
+    try {
+      const envelope = typeof encryptedPayload === "string" ? JSON.parse(encryptedPayload) : encryptedPayload;
+      if (envelope && envelope.version === "e2e_rsa_v1" && userSharingPrivateKey) {
+        // Decrypt ephemeral AES key with recipient private RSA key
+        const encKeyBuf = hexToBuffer(envelope.enc_key);
+        const rawAesKey = await window.crypto.subtle.decrypt(
+          { name: "RSA-OAEP" },
+          userSharingPrivateKey,
+          encKeyBuf
+        );
+
+        const ephemeralKey = await window.crypto.subtle.importKey(
+          "raw",
+          rawAesKey,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["decrypt"]
+        );
+
+        // Decrypt item payload
+        const ivBuf = hexToBuffer(envelope.iv);
+        const dataBuf = hexToBuffer(envelope.data);
+        const decBuf = await window.crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: new Uint8Array(ivBuf) },
+          ephemeralKey,
+          dataBuf
+        );
+
+        decryptedItemData = JSON.parse(bufferToStr(decBuf));
+      }
+    } catch (e) {
+      console.warn("E2E RSA decryption attempt:", e);
+    }
+
+    // Direct fallback if encrypted with master key
+    if (!decryptedItemData) {
+      decryptedItemData = await decryptPayload(encryptedPayload, masterEncryptionKey);
+    }
+
+    if (!decryptedItemData) {
+      throw new Error("Entschlüsselung fehlgeschlagen. Der Schlüssel stimmt nicht überein.");
+    }
+
+    // Re-encrypt with recipient's own master encryption key!
+    const reEncryptedPayload = await encryptPayload(decryptedItemData, masterEncryptionKey);
+
+    const postRes = await fetch("/api/vault/items", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -3117,9 +3770,13 @@ async function importSharedItemIntoVault(sharedId, title, type, encryptedPayload
         type: type,
         title: title + " (Geteilt)",
         favorite: false,
-        encrypted_payload: encryptedPayload
+        encrypted_payload: reEncryptedPayload
       })
     });
+
+    if (!postRes.ok) {
+      throw new Error("Fehler beim Speichern im Tresor.");
+    }
 
     // Delete from inbox after importing
     await fetch(`/api/share/inbox/${sharedId}`, {
@@ -3127,7 +3784,7 @@ async function importSharedItemIntoVault(sharedId, title, type, encryptedPayload
       headers: { "Authorization": `Bearer ${sessionToken}` }
     });
 
-    showToast(`"${title}" erfolgreich in deinen Tresor importiert!`, "success");
+    showToast(`"${title}" erfolgreich entschlüsselt und in deinen Tresor importiert!`, "success");
     await loadVault();
     await loadSharedInbox();
   } catch (err) {

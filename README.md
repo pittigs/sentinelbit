@@ -39,12 +39,13 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 
 ## ✨ Features im Überblick
 
-* 🚀 **Single Static Binary**: Das komplette Backend kompiliert in eine einzige schlanke Binärdatei (~18 MB) – keine Python-, pip- oder Node-Laufzeitumgebungen erforderlich!
+* 🚀 **100% Pure Go Single Binary**: Das komplette Backend kompiliert in eine einzige schlanke Binärdatei (~18 MB) – absolut keine Python-, Node- oder Pip-Abhängigkeiten mehr!
 * 🍓 **Optimiert für Raspberry Pi 5 (ARM64)**: Verbraucht im Leerlauf unter 15 MB RAM, startet in Millisekunden und schont CPU & SD-Karte.
-* 🛡️ **Zero-Knowledge Kryptografie**: 
+* 🛡️ **Zero-Knowledge Kryptografie & Tresor-Gesundheit**: 
   * PBKDF2-HMAC-SHA256 mit 100.000 Iterationen (Client-seitig).
   * Zweite serverseitige Hashing-Schicht mit separatem Salt gegen Datenbank-Leaks.
   * AES-256-GCM für jeden Tresor-Eintrag mit kryptografisch zufälligen IVs.
+  * **Interaktiver Tresor-Gesundheitscheck**: Analysiert wiederverwendete Passwörter, schwache Passwörter und fehlende 2FA rein lokal im Browser mit direktem 1-Klick-Bearbeiten.
 * ⚡ **FIDO2 / WebAuthn Hardware Passkeys**:
   * Erstellung, Speicherung und Assertion-Signierung von P-256 (ES256) Passkeys.
   * Biometrisches Entsperren via **Windows Hello, Touch ID oder Fingerabdruck**.
@@ -56,11 +57,11 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 * 📥 **Universeller Multi-Manager Importer**:
   * Nahtloser 1-Klick-Import aus **Bitwarden** (JSON/CSV), **1Password** (1PUX/CSV), **KeePassXC** (CSV), **LastPass** sowie **Google Chrome** & **Mozilla Firefox**.
 * 🔄 **Automatisierter Backup & Sync-Dienst**:
-  * Zeitgesteuerte und ereignisbasierte Backups mit konfigurierbarer Dateirotation.
+  * Isolierte, benutzerspezifische Backups mit konfigurierbarer Dateirotation und Retention.
 * 🎭 **E-Mail-Maskierung ("Hide My Email")**:
   * Generiere auf Knopfdruck zufällige Relay-Aliase für Online-Registrierungen.
-* 🤝 **Asymmetrisches Tresor-Sharing**:
-  * Teile Passwörter sicher Ende-zu-Ende verschlüsselt mit anderen Nutzern.
+* 🤝 **Asymmetrisches E2E Tresor-Sharing**:
+  * Teile Passwörter sicher Ende-zu-Ende verschlüsselt mit RSA-OAEP + AES-256-GCM.
 
 ---
 
@@ -68,7 +69,7 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 
 ### Methode 1: Docker (Empfohlen für Raspberry Pi 5 & Server)
 
-Das mitgelieferte Dockerfile unterstützt Multi-Architektur (`linux/arm64` und `linux/amd64`):
+Das mitgelieferte Dockerfile unterstützt Multi-Architektur (`linux/arm64` und `linux/amd64`) inklusive Container-Healthcheck:
 
 ```bash
 # 1. Repository klonen
@@ -83,19 +84,17 @@ docker compose up -d
 
 ---
 
-### Methode 2: Nativ mit Go starten
+### Methode 2: Makefile / Nativ mit Go starten
 
 Voraussetzung: [Go 1.22+](https://golang.org/dl/)
 
 ```bash
-# 1. Abhängigkeiten laden
-go mod download
+# Bauen & Starten via Makefile:
+make build          # Kompiliert das Binary nach ./bin/sentinelbit
+make run            # Startet Sentinelbit direkt
 
-# 2. Kompilieren
-go build -o sentinelbit ./cmd/server
-
-# 3. Starten
-./sentinelbit
+# Oder Cross-Compilation für den Raspberry Pi 5 (ARM64):
+make build-pi       # Erstellt ./bin/sentinelbit-arm64
 ```
 
 ---

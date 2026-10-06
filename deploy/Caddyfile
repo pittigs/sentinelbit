@@ -1,0 +1,21 @@
+# ==============================================================================
+# Sentinelbit - Caddyfile (Empfohlener Reverse-Proxy mit automatischem HTTPS)
+# ==============================================================================
+# WebAuthn / Passkeys setzen im Browser zwingend HTTPS voraus (außer auf localhost).
+# Caddy stellt automatisch gültige SSL-Zertifikate aus (Let's Encrypt oder lokales CA).
+
+# OPTION A: Öffentliche Domain (z. B. DynDNS / eigene Domain)
+# vault.deinedomain.de {
+#     reverse_proxy 127.0.0.1:8000
+# }
+
+# OPTION B: Lokales Heimnetzwerk / Raspberry Pi (mit selbst-signiertem lokalem CA)
+sentinelbit.local, 127.0.0.1:8443 {
+    tls internal
+
+    reverse_proxy 127.0.0.1:8000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

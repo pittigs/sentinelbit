@@ -225,13 +225,6 @@ func SignWebAuthnAssertion(privateKeyPem, clientDataJson, authDataHex string) (*
 		return nil, err
 	}
 
-	// ASN.1 DER encoding for WebAuthn ECDSA signature
-	type ecdsaSignature struct {
-		R, S *big.Int
-	}
-	derSig, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey) // scratch check
-	_ = derSig
-	// Use asn1 marshal for r, s
 	derBytes, err := marshalECDSASignature(r, s)
 	if err != nil {
 		return nil, err

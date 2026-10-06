@@ -1,0 +1,29 @@
+[Unit]
+Description=Sentinelbit Zero-Knowledge Password & Passkey Manager
+Documentation=https://github.com/pittigs/sentinelbit
+After=network.target
+
+[Service]
+Type=simple
+User=sentinelbit
+Group=sentinelbit
+WorkingDirectory=/opt/sentinelbit
+ExecStart=/opt/sentinelbit/sentinelbit
+Restart=always
+RestartSec=5s
+
+# Umgebungsvariablen
+Environment=SENTINELBIT_DATA_DIR=/opt/sentinelbit/data
+Environment=SENTINELBIT_PORT=8000
+
+# Sicherheit & Sandboxing
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+# Dateibeschränkungen
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

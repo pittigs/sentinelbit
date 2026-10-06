@@ -119,6 +119,29 @@ func (rl *RateLimiter) RecordSuccess(key string) {
 	delete(rl.storage, key)
 }
 
+// Cleanup purges stale rate limiter entries whose block duration has passed and have no recent attempts
+func (rl *RateLimiter) Cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.windowSec)
+	for key, entry := range rl.storage {
+		if now.After(entry.blockedUntil) {
+			hasRecent := false
+			for _, ts := range entry.timestamps {
+				if ts.After(cutoff) {
+					hasRecent = true
+					break
+				}
+			}
+			if !hasRecent {
+				delete(rl.storage, key)
+			}
+		}
+	}
+}
+
 // TOTP Replay Guard
 type TotpReplayGuard struct {
 	mu   sync.Mutex
@@ -152,6 +175,19 @@ func (g *TotpReplayGuard) CheckAndRecord(userId, code string) bool {
 	return true
 }
 
+// Cleanup purges expired entries from the replay guard map
+func (g *TotpReplayGuard) Cleanup() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := time.Now()
+	for k, exp := range g.seen {
+		if now.After(exp) {
+			delete(g.seen, k)
+		}
+	}
+}
+
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -160,7 +196,13 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';")
+			"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://www.google.com https://*.gstatic.com; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';")
+
+		// HSTS (HTTP Strict Transport Security) if TLS or HTTPS proxy is active
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }

@@ -38,6 +38,10 @@ ENV SENTINELBIT_PORT=8000
 
 EXPOSE 8000
 
+# Docker Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/ || exit 1
+
 # Startbefehl
 CMD ["/app/sentinelbit"]
 

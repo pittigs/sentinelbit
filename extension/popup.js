@@ -7,7 +7,20 @@
  * - Password Generator with 1-Click Page Autofill
  */
 
-const SERVER_URL = "http://127.0.0.1:8000";
+let SERVER_URL = "http://127.0.0.1:8000";
+
+async function loadServerUrl() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["server_url"], (res) => {
+      if (res && res.server_url) {
+        SERVER_URL = res.server_url;
+      }
+      const footerLink = document.getElementById("footer-vault-link");
+      if (footerLink) footerLink.href = SERVER_URL;
+      resolve(SERVER_URL);
+    });
+  });
+}
 
 let allVaultItems = [];
 let activeHostname = "";
@@ -111,6 +124,7 @@ async function decryptPayload(encryptedJsonStr, cryptoKey) {
 // =============================================================
 
 document.addEventListener("DOMContentLoaded", async () => {
+  await loadServerUrl();
   setupTabs();
   setupGenerator();
   setupHeaderButtons();
@@ -305,11 +319,14 @@ function renderItems() {
       listEl.innerHTML = `
         <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
           Kein Eintrag für <strong>${escapeHtml(activeHostname)}</strong> gefunden.<br>
-          <button class="btn btn-secondary" style="margin-top: 10px; font-size: 0.75rem;" onclick="document.getElementById('btn-toggle-all').click()">
+          <button class="btn btn-secondary" id="btn-show-all-empty" style="margin-top: 10px; font-size: 0.75rem;">
             Alle ${allVaultItems.length} Logins anzeigen
           </button>
         </div>
       `;
+      document.getElementById("btn-show-all-empty")?.addEventListener("click", () => {
+        document.getElementById("btn-toggle-all")?.click();
+      });
     } else {
       listEl.innerHTML = `
         <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
@@ -704,7 +721,12 @@ function setupHeaderButtons() {
 async function triggerOpenAndSyncVault() {
   try {
     const tabs = await chrome.tabs.query({});
-    const vaultTab = tabs.find(t => t.url && (t.url.includes("127.0.0.1:8000") || t.url.includes("localhost:8000")));
+    let serverOrigin = "http://127.0.0.1:8000";
+    try {
+      serverOrigin = new URL(SERVER_URL).origin;
+    } catch (e) {}
+
+    const vaultTab = tabs.find(t => t.url && (t.url.startsWith(serverOrigin) || t.url.includes("127.0.0.1:8000") || t.url.includes("localhost:8000")));
 
     if (vaultTab && vaultTab.id) {
       chrome.tabs.sendMessage(vaultTab.id, { action: "TRIGGER_VAULT_PAGE_SYNC" }, () => {});

@@ -29,6 +29,7 @@ import (
 	"sentinelbit/internal/db"
 	"sentinelbit/internal/models"
 	"sentinelbit/internal/security"
+	"sentinelbit/static"
 )
 
 var (
@@ -115,6 +116,7 @@ func setupRouter(database *sql.DB) *chi.Mux {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.Compress(5))
 	r.Use(security.SecurityHeadersMiddleware)
 
 	// API Routes
@@ -190,17 +192,31 @@ func setupRouter(database *sql.DB) *chi.Mux {
 		api.Delete("/share/inbox/{itemId}", requireAuth(handleDeleteSharedInboxItem(database)))
 	})
 
-	// Static frontend
+	// Static frontend: Use local disk if static/index.html exists (for live dev/customization),
+	// otherwise serve from compiled-in embedded assets (for 100% standalone single binary).
 	staticDir := filepath.Join(".", "static")
-	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
-		_ = os.MkdirAll(staticDir, 0755)
-	}
+	localIndex := filepath.Join(staticDir, "index.html")
 
-	fs := http.FileServer(http.Dir(staticDir))
-	r.Handle("/static/*", http.StripPrefix("/static/", fs))
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
-	})
+	if _, err := os.Stat(localIndex); err == nil {
+		fs := http.FileServer(http.Dir(staticDir))
+		r.Handle("/static/*", http.StripPrefix("/static/", fs))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, localIndex)
+		})
+	} else {
+		// Embedded filesystem fallback
+		embeddedFS := http.FileServer(http.FS(static.EmbeddedFiles))
+		r.Handle("/static/*", http.StripPrefix("/static/", embeddedFS))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			content, err := static.EmbeddedFiles.ReadFile("index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(content)
+		})
+	}
 
 	return r
 }
@@ -215,6 +231,35 @@ func main() {
 	// Start background backup worker
 	backup.Engine.Start()
 	defer backup.Engine.Stop()
+
+	// Start in-memory garbage collector (sessions, rate limiters, replay guard)
+	gcTicker := time.NewTicker(2 * time.Minute)
+	gcStop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-gcTicker.C:
+				now := time.Now()
+				// Prune expired sessions
+				sessionMu.Lock()
+				for token, sess := range sessions {
+					if now.After(sess.ExpiresAt) {
+						delete(sessions, token)
+					}
+				}
+				sessionMu.Unlock()
+
+				// Prune rate limiters & replay guards
+				loginLimiter.Cleanup()
+				totpLimiter.Cleanup()
+				replayGuard.Cleanup()
+			case <-gcStop:
+				gcTicker.Stop()
+				return
+			}
+		}
+	}()
+	defer close(gcStop)
 
 	r := setupRouter(database)
 
@@ -800,6 +845,7 @@ func handleDeleteVaultItem(db *sql.DB) http.HandlerFunc {
 		} else {
 			now := time.Now().UTC().Format(time.RFC3339)
 			_, _ = db.Exec("UPDATE vault_items SET deleted_at = ? WHERE id = ? AND user_id = ?", now, itemId, user.UserId)
+			_, _ = db.Exec("UPDATE passkeys SET deleted_at = ? WHERE vault_item_id = ? AND user_id = ?", now, itemId, user.UserId)
 			_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
 			jsonResponse(w, map[string]string{"status": "ok", "message": "Eintrag in den Papierkorb verschoben"}, http.StatusOK)
 		}
@@ -812,6 +858,7 @@ func handleRestoreVaultItem(db *sql.DB) http.HandlerFunc {
 		itemId := chi.URLParam(r, "itemId")
 
 		_, _ = db.Exec("UPDATE vault_items SET deleted_at = NULL WHERE id = ? AND user_id = ?", itemId, user.UserId)
+		_, _ = db.Exec("UPDATE passkeys SET deleted_at = NULL WHERE vault_item_id = ? AND user_id = ?", itemId, user.UserId)
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
 		jsonResponse(w, map[string]string{"status": "ok", "message": "Eintrag aus dem Papierkorb wiederhergestellt"}, http.StatusOK)
 	}
@@ -821,6 +868,8 @@ func handleEmptyTrash(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := getUserFromCtx(r)
 		_, _ = db.Exec("DELETE FROM vault_items WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", user.UserId)
+		_, _ = db.Exec("DELETE FROM passkeys WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", user.UserId)
+		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
 		jsonResponse(w, map[string]string{"status": "ok", "message": "Papierkorb vollständig geleert"}, http.StatusOK)
 	}
 }
@@ -875,7 +924,7 @@ func handleListPasskeys(db *sql.DB) http.HandlerFunc {
 		rows, err := db.Query(`
 			SELECT id, vault_item_id, rp_id, rp_name, username, user_handle, credential_id,
 			       encrypted_private_key, public_key_cose, public_key_pem, sign_count, transports, created_at, last_used_at
-			FROM passkeys WHERE user_id = ? ORDER BY created_at DESC
+			FROM passkeys WHERE user_id = ? AND (deleted_at IS NULL OR deleted_at = '') ORDER BY created_at DESC
 		`, user.UserId)
 		if err != nil {
 			httpError(w, "Datenbankfehler", http.StatusInternalServerError)
@@ -952,6 +1001,8 @@ func handleSavePasskey(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+
 		jsonResponse(w, map[string]string{
 			"status":  "ok",
 			"id":      pkId,
@@ -965,6 +1016,7 @@ func handleDeletePasskey(db *sql.DB) http.HandlerFunc {
 		user := getUserFromCtx(r)
 		pkId := chi.URLParam(r, "passkeyId")
 		_, _ = db.Exec("DELETE FROM passkeys WHERE id = ? AND user_id = ?", pkId, user.UserId)
+		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
 		jsonResponse(w, map[string]string{"status": "ok", "message": "Passkey gelöscht"}, http.StatusOK)
 	}
 }

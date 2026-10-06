@@ -11,15 +11,20 @@
 
 const isSentinelBitVaultPage =
   window.location.origin === "http://127.0.0.1:8000" ||
-  window.location.origin === "http://localhost:8000";
+  window.location.origin === "http://localhost:8000" ||
+  !!document.querySelector('meta[name="sentinelbit-vault"]') ||
+  document.title.toLowerCase().includes("sentinelbit");
 
 if (isSentinelBitVaultPage) {
-  // Announce extension presence to the web vault
+  // Store detected active server origin in extension storage
+  chrome.storage.local.set({ server_url: window.location.origin });
+
+  // Announce extension presence to the web vault securely
   window.postMessage({
     source: "SENTINELBIT_EXTENSION",
     action: "EXTENSION_READY",
     version: "1.2.0"
-  }, "*");
+  }, window.location.origin);
 
   // Listen for sync messages from the web vault
   window.addEventListener("message", (event) => {
@@ -33,6 +38,7 @@ if (isSentinelBitVaultPage) {
         chrome.storage.local.set({
           vault_cache: items,
           vault_user: user,
+          server_url: window.location.origin,
           last_synced: Date.now()
         }, () => {
           window.postMessage({
@@ -40,14 +46,14 @@ if (isSentinelBitVaultPage) {
             action: "SYNC_ACK",
             count: items.length,
             timestamp: Date.now()
-          }, "*");
+          }, window.location.origin);
         });
       } else if (event.data.action === "CHECK_EXTENSION") {
         window.postMessage({
           source: "SENTINELBIT_EXTENSION",
           action: "EXTENSION_READY",
           version: "1.2.0"
-        }, "*");
+        }, window.location.origin);
       }
     }
   });

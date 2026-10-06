@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 SentinelBit Developer CLI (`SENTINELBIT_cli.py`).
 Command-line interface for SentinelBit:
@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional
 
 import httpx
 import crypto_utils
+import database
 from backup_service import backup_engine
 
 DEFAULT_SERVER = "http://127.0.0.1:8000"
@@ -91,6 +92,7 @@ def cmd_login(args):
         session_data = {
             "server": server,
             "token": verify_data["token"],
+            "user_id": verify_data.get("user_id", ""),
             "username": verify_data["username"],
             "enc_salt": verify_data["enc_salt"]
         }
@@ -144,11 +146,34 @@ def cmd_generate(args):
 
 def cmd_backup(args):
     sess = load_session()
-    server = sess.get("server", DEFAULT_SERVER) if sess else DEFAULT_SERVER
-    dest = args.dest or os.path.abspath("./backups")
+    if not sess:
+        print("❌ Nicht angemeldet. Bitte zuerst ausführen: python sentinelbit_cli.py login <username>")
+        return
 
-    res = backup_engine.perform_sync(sess["username"]) if sess else None
-    print(f"✓ Backup-Vorgang abgeschlossen: Ziel = {dest}")
+    user_id = sess.get("user_id")
+    if not user_id:
+        try:
+            conn = database.get_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM users WHERE username = ?", (sess.get("username", "").lower(),))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                user_id = row["id"]
+        except Exception:
+            pass
+
+    if not user_id:
+        print("❌ Benutzer-ID nicht gefunden. Bitte erneut anmelden.")
+        return
+
+    dest = args.dest or os.path.abspath("./backups")
+    res = backup_engine.perform_sync(user_id)
+    if res and res.get("status") == "error":
+        print(f"❌ Backup fehlgeschlagen: {res.get('message', 'Unbekannter Fehler')}")
+    else:
+        out_file = res.get("filepath", dest) if res else dest
+        print(f"✓ Backup-Vorgang erfolgreich abgeschlossen: {out_file}")
 
 def cmd_status(args):
     sess = load_session()
