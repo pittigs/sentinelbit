@@ -3938,6 +3938,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // 5. Sidebar Pin initialization
   const isPinned = localStorage.getItem("SENTINELBIT_sidebar_pinned") === "true";
   const sidebar = document.getElementById("app-sidebar") || document.querySelector(".sidebar");
+
+  // 6. Progressive Web App (PWA) Service Worker Registration
+  if ("serviceWorker" in navigator && (window.location.protocol === "https:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+  }
   if (sidebar && isPinned) {
     sidebar.classList.add("is-pinned");
     const pinBtn = document.getElementById("sidebar-pin-btn");

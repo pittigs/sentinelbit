@@ -95,42 +95,61 @@ docker compose up -d
 Voraussetzung: [Go 1.22+](https://golang.org/dl/)
 
 ```bash
-# Bauen & Starten via Makefile:
-make build          # Kompiliert das Binary nach ./bin/sentinelbit
-make run            # Startet Sentinelbit direkt
+# Bauen & Starten via Linux-Startskript:
+./run.sh            # Startet Sentinelbit direkt auf http://127.0.0.1:8000
+
+# Bauen via Makefile (kompiliert Server & CLI nach ./bin/):
+make build          # Kompiliert ./bin/sentinelbit und ./bin/sentinelbit-cli
+make run            # Startet den Server direkt
 
 # Oder Cross-Compilation für den Raspberry Pi 5 (ARM64):
-make build-pi       # Erstellt ./bin/sentinelbit-arm64
+make build-pi       # Erstellt ./bin/sentinelbit-arm64 & CLI
 ```
+
+---
+
+## 💻 Natives CLI-Tool (`sentinelbit-cli`)
+
+Das mitgelieferte Go-CLI erlaubt administrative Aufgaben und Statusabfragen direkt im Terminal:
+
+```bash
+# Server-Status & Verbindung prüfen
+./bin/sentinelbit-cli status
+
+# Registrierte Benutzer und Tresorstatistiken einsehen
+./bin/sentinelbit-cli users
+```
+
+---
+
+## ⚙️ Konfiguration & Umgebungsvariablen
+
+Kopiere die Vorlage `.env.example` oder setze die Umgebungsvariablen:
+
+```bash
+SENTINELBIT_PORT=8000                  # HTTP-Port (Standard: 8000)
+SENTINELBIT_HOST=0.0.0.0               # Bind-Host (z.B. 127.0.0.1 für lokale Nutzung)
+SENTINELBIT_DATA_DIR=./data            # Pfad für SQLite-Datenbank & Backups
+SENTINELBIT_DISABLE_REGISTRATION=true  # Schließt offene Registrierung für Fremde
+SENTINELBIT_LOG_LEVEL=info             # Log-Level: debug, info, warn, error
+```
+
+---
+
+## 📱 Progressive Web App (PWA)
+
+sentinelbit enthält ein Web App Manifest und einen integrierten Service Worker.
+* **Mobilgeräte (iOS / Android)**: Im Browser öffnen und **"Zum Startbildschirm hinzufügen"** antippen, um Sentinelbit wie eine native App ohne störende Browserleisten zu nutzen.
+* **Desktop (Chrome / Edge / Brave)**: Auf das Installations-Icon in der URL-Leiste klicken, um die App als Standalone-Fenster zu installieren.
 
 ---
 
 ## 🧪 Tests ausführen
 
-sentinelbit verfügt über eine umfangreiche Testsuite für Kryptografie, Rate-Limiting, Replay-Schutz und Header:
+sentinelbit verfügt über eine vollständige Testsuite für alle Pakete (Kryptografie, Rate-Limiting, Replay-Schutz, HTTP-Header, Konfiguration und Datenbank):
 
 ```bash
-go test -v ./cmd/server
-```
-
-Ausgabe:
-```text
-=== RUN   TestPBKDF2KeyDerivation
---- PASS: TestPBKDF2KeyDerivation (0.05s)
-=== RUN   TestRateLimiter
---- PASS: TestRateLimiter (0.00s)
-=== RUN   TestTOTPAndReplayGuard
---- PASS: TestTOTPAndReplayGuard (0.00s)
-=== RUN   TestWebAuthnPasskeySigning
---- PASS: TestWebAuthnPasskeySigning (0.00s)
-=== RUN   TestSecuritySanitization
---- PASS: TestSecuritySanitization (0.00s)
-=== RUN   TestSecurityHeadersMiddleware
---- PASS: TestSecurityHeadersMiddleware (0.00s)
-=== RUN   TestAntiEnumerationSalts
---- PASS: TestAntiEnumerationSalts (0.00s)
-PASS
-ok  	sentinelbit/cmd/server	0.090s
+go test -v ./...
 ```
 
 ---

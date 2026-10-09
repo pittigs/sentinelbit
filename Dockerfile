@@ -16,34 +16,38 @@ COPY . .
 ARG TARGETOS
 ARG TARGETARCH
 
-# Statisches, CGO-freies Binary kompilieren
+# Statische, CGO-freie Binaries kompilieren
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o sentinelbit ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o sentinelbit-cli ./cmd/cli
 
 # -------------------------------------------------------------
-# Minimales Produktiv-Image (Alpine oder Scratch)
+# Minimales Produktiv-Image
 # -------------------------------------------------------------
 FROM alpine:3.20
 
-# TLS-Zertifikate für sichere externe Anfragen (z.B. HIBP) & Zeitzonen
+# TLS-Zertifikate für sichere externe Anfragen & Zeitzonen
 RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
 
-# Nur die Binärdatei und statische Frontend-Dateien kopieren
+# Binärdateien und statische Assets kopieren
 COPY --from=builder /app/sentinelbit /app/sentinelbit
+COPY --from=builder /app/sentinelbit-cli /usr/local/bin/sentinelbit-cli
 COPY --from=builder /app/static /app/static
 
 # Datenverzeichnis für SQLite & Backups
 VOLUME /data
 ENV SENTINELBIT_DATA_DIR=/data
 ENV SENTINELBIT_PORT=8000
+ENV SENTINELBIT_HOST=0.0.0.0
+ENV SENTINELBIT_DISABLE_REGISTRATION=false
+ENV SENTINELBIT_LOG_LEVEL=info
 
 EXPOSE 8000
 
 # Docker Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/ || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/api/health || exit 1
 
 # Startbefehl
 CMD ["/app/sentinelbit"]
-

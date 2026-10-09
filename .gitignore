@@ -1,4 +1,5 @@
 # Binaries
+bin/
 *.exe
 *.exe~
 *.dll
@@ -6,6 +7,7 @@
 *.dylib
 sentinelbit
 sentinelbit.exe
+sentinelbit-cli
 
 # Database & Runtime Secrets
 *.db
@@ -13,6 +15,7 @@ sentinelbit.exe
 *.db-shm
 .server_secret
 .sentinelbit_session.json
+.env
 
 # Temporary & Test Dirs
 test_sync_output/
