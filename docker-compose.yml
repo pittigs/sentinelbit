@@ -36,7 +36,7 @@ services:
       - TZ=Europe/Berlin
       - RCLONE_DIR=/data/backups
       - RCLONE_REMOTE=gdrive:SentinelBit-Backups
-      - SYNC_INTERVAL=6h
+      - SYNC_INTERVAL=2m
     volumes:
       - sentinelbit-data:/data:ro
       - ./rclone:/config/rclone:ro
