@@ -310,6 +310,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "TOUCH_ACTIVITY") {
     chrome.storage.local.set({ last_active_time: Date.now() });
     sendResponse({ status: "ok" });
+  } else if (request.action === "GET_MATCHING_LOGINS") {
+    getSessionData().then(session => {
+      const items = session.vault_cache || [];
+      const hostname = extractDomain(request.url || "");
+      const matches = items.filter(it => matchesDomain(it, hostname));
+      sendResponse({ matches, totalItems: items.length });
+    });
+    return true;
   }
   return true;
 });
