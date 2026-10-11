@@ -1077,7 +1077,7 @@ const ALL_ACHIEVEMENTS = [
   { id: "first_item", icon: "🌱", title: "Erster Schritt", desc: "Mindestens einen Tresor-Eintrag erstellt." },
   { id: "strong_passwords", icon: "💪", title: "Festungsmauer", desc: "Alle gespeicherten Passwörter haben ≥ 14 Zeichen." },
   { id: "passkey_pioneer", icon: "⚡", title: "Passkey-Pionier", desc: "Mindestens einen FIDO2 Passkey registriert." },
-  { id: "two_factor_hero", icon: "🛡️", title: "Zwei-Faktor-Held", desc: "2FA (TOTP) für den Tresor aktiviert." },
+  { id: "two_factor_hero", icon: "🛡️", title: "Zwei-Faktor-Held", desc: "2FA (TOTP) für den Tresor oder gespeicherte Dienste eingerichtet." },
   { id: "biometric_ninja", icon: "🖐️", title: "Biometrie-Meister", desc: "Windows Hello / Touch ID eingerichtet." },
   { id: "backup_guardian", icon: "🔄", title: "Backup-Wächter", desc: "Automatischen Backup- und Sync-Plan aktiviert." },
   { id: "alias_ghost", icon: "🎭", title: "Maskierter Schatten", desc: "Mindestens einen E-Mail-Alias erstellt." },
@@ -1088,7 +1088,8 @@ function calculateAchievements() {
   const unlocked = new Set();
   const totalLogins = decryptedItems.filter(i => i.type === "login");
   const hasPasskeys = passkeysList.length > 0;
-  const is2FaActive = !!(currentUser && currentUser.totp_enabled);
+  const hasTotpItems = decryptedItems.some(i => i.data && (i.data.totp || i.data.totp_secret));
+  const is2FaActive = !!(currentUser && currentUser.totp_enabled) || hasTotpItems;
   const isBioActive = !!localStorage.getItem("SENTINELBIT_bio_wrapped");
   const hasBackup = document.getElementById("badge-sync-status")?.innerText.includes("Aktiv");
   const hasAliases = parseInt(document.getElementById("count-aliases")?.innerText || "0") > 0;
