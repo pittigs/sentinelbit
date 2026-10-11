@@ -30,6 +30,41 @@ services:
     volumes:
       - sentinelbit-data:/data
 
+  rclone-backup:
+    image: rclone/rclone:latest
+    container_name: sentinelbit_rclone
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+      - RCLONE_DIR=/data/backups
+      - RCLONE_REMOTE=gdrive:SentinelBit-Backups
+      - SYNC_INTERVAL=6h
+    volumes:
+      - sentinelbit-data:/data:ro
+      - ./rclone:/config/rclone:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "🚀 [rclone] SentinelBit Google Drive Backup Companion gestartet."
+        while true; do
+          if [ ! -f /config/rclone/rclone.conf ]; then
+            echo "⚠️ [rclone] Keine rclone.conf in ./rclone gefunden! Bitte einmalig 'docker run --rm -it -v $$(pwd)/rclone:/config/rclone rclone/rclone config' ausführen."
+            sleep 60
+            continue
+          fi
+          if [ -d "$$RCLONE_DIR" ] && [ "$$(ls -A "$$RCLONE_DIR" 2>/dev/null)" ]; then
+            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Starte Backup-Upload nach $$RCLONE_REMOTE..."
+            rclone copy "$$RCLONE_DIR" "$$RCLONE_REMOTE" --verbose
+            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Upload erfolgreich abgeschlossen."
+          else
+            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Noch keine Backups in $$RCLONE_DIR vorhanden (im Web-Tresor unter Einstellungen aktivieren). Warte..."
+          fi
+          echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Nächster Sync in $$SYNC_INTERVAL."
+          sleep "$$SYNC_INTERVAL"
+        done
+    networks:
+      - default
+
 volumes:
   sentinelbit-data:
 

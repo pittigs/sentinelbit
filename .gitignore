@@ -23,6 +23,7 @@ dist/
 test_sync_output/
 backups/
 data/
+rclone/
 
 # Python cache
 __pycache__/
