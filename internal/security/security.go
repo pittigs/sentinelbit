@@ -207,6 +207,35 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// CORSMiddleware handles Cross-Origin Resource Sharing for browser extensions and companion clients
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			// Allow browser extensions (Chrome/Firefox/Edge), localhost, and HTTPS origins
+			if strings.HasPrefix(origin, "chrome-extension://") ||
+				strings.HasPrefix(origin, "moz-extension://") ||
+				strings.HasPrefix(origin, "http://localhost") ||
+				strings.HasPrefix(origin, "http://127.0.0.1") ||
+				strings.HasPrefix(origin, "https://") {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, X-Requested-With")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+			}
+		}
+
+		// Handle preflight OPTIONS requests immediately
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func GetIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {

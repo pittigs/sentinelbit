@@ -23,7 +23,7 @@ if (isSentinelBitVaultPage) {
   window.postMessage({
     source: "SENTINELBIT_EXTENSION",
     action: "EXTENSION_READY",
-    version: "1.2.0"
+    version: "3.0.0"
   }, window.location.origin);
 
   // Listen for sync messages from the web vault
@@ -35,12 +35,21 @@ if (isSentinelBitVaultPage) {
         const items = event.data.items || [];
         const user = event.data.user || "";
 
+        // Send items securely to background service worker memory / session storage
+        chrome.runtime.sendMessage({
+          action: "SET_SESSION_VAULT",
+          items: items
+        }, () => {});
+
+        // Store only safe metadata in persistent storage (no plain passwords)
         chrome.storage.local.set({
-          vault_cache: items,
           vault_user: user,
           server_url: window.location.origin,
           last_synced: Date.now()
         }, () => {
+          // Clean legacy plain passwords if any existed
+          chrome.storage.local.remove(["vault_cache"], () => {});
+
           window.postMessage({
             source: "SENTINELBIT_EXTENSION",
             action: "SYNC_ACK",
@@ -52,7 +61,7 @@ if (isSentinelBitVaultPage) {
         window.postMessage({
           source: "SENTINELBIT_EXTENSION",
           action: "EXTENSION_READY",
-          version: "1.2.0"
+          version: "3.0.0"
         }, window.location.origin);
       }
     }

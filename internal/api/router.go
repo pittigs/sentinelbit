@@ -24,6 +24,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
+	r.Use(security.CORSMiddleware)
 	r.Use(security.SecurityHeadersMiddleware)
 
 	// API Routes
@@ -36,8 +37,22 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 			JSONResponse(w, map[string]string{
 				"status":       "healthy",
 				"service":      "sentinelbit (Go)",
-				"version":      "2.1.0",
+				"version":      "3.0.0",
 				"registration": regStatus,
+			}, http.StatusOK)
+		})
+
+		api.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
+			if database != nil {
+				if err := database.Ping(); err != nil {
+					HTTPError(w, "Database connection unavailable", http.StatusServiceUnavailable)
+					return
+				}
+			}
+			JSONResponse(w, map[string]string{
+				"status":   "ready",
+				"database": "connected",
+				"version":  "3.0.0",
 			}, http.StatusOK)
 		})
 

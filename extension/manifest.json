@@ -1,19 +1,22 @@
 {
   "manifest_version": 3,
   "name": "sentinelbit Password & Passkey Manager",
-  "version": "1.2.0",
-  "description": "Auto-Fill, Passkeys und 2FA-Codes direkt im Browser mit deiner lokalen sentinelbit Instanz.",
+  "version": "3.0.0",
+  "description": "Zero-Knowledge Autofill, Passkeys und 2FA-Codes für deine selbstgehostete sentinelbit Instanz.",
   "permissions": [
     "activeTab",
     "storage",
     "scripting",
-    "tabs"
+    "tabs",
+    "alarms",
+    "contextMenus"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "http://127.0.0.1:8000/*",
-    "http://localhost:8000/*"
+    "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "sentinelbit",
@@ -27,6 +30,15 @@
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
+  },
+  "commands": {
+    "autofill_active_tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Zugangsdaten für aktuelle Seite ausfüllen"
+    }
   },
   "content_scripts": [
     {

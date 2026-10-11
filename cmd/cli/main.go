@@ -11,7 +11,7 @@ import (
 	"sentinelbit/internal/db"
 )
 
-const cliVersion = "2.1.0"
+const cliVersion = "3.0.0"
 
 func printUsage() {
 	fmt.Println("🛡️  sentinelbit-cli - Zero-Knowledge Management CLI")

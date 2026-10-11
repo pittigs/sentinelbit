@@ -1,7 +1,8 @@
-# 🛡️ sentinelbit (Go 2.0 Edition)
+# 🛡️ sentinelbit (v3.0.0 Major Release)
 
 [![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Security Architecture](https://img.shields.io/badge/Security-Zero--Knowledge-10b981?style=flat&logo=security)](https://github.com)
+[![Chrome Web Store](https://img.shields.io/badge/Extension-Manifest%20V3-4285F4?style=flat&logo=googlechrome)](CHROME_STORE_GUIDE.md)
 [![Docker Ready](https://img.shields.io/badge/Docker-Multi--Arch%20(ARM64%20%2F%20AMD64)-2496ED?style=flat&logo=docker)](https://docker.com)
 [![Passkeys FIDO2](https://img.shields.io/badge/FIDO2-WebAuthn%20P--256-8b5cf6?style=flat&logo=fido)](https://fidoalliance.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -12,27 +13,31 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 
 ---
 
-## 📸 Screenshots & Architektur
+## 📸 Architektur & Zero-Knowledge Workflow
 
 ```
-                                  +------------------------------------+
-                                  |     sentinelbit Client (Browser)   |
-                                  |   Master Password -> PBKDF2 100k   |
-                                  |  AES-256-GCM Verschlüsselung       |
-                                  +-----------------+------------------+
-                                                    | (Nur Ciphertext & Auth Hash)
-                                                    v
-+---------------------------------------------------+-----------------------------------+
-|                            sentinelbit Daemon (Go Server)                             |
-|                                                                                       |
-|  [Chi Router]       [Rate Limiter]       [TOTP Replay Guard]      [Security Headers]  |
-|         |                  |                      |                       |           |
-|         +------------------+----------------------+-----------------------+           |
-|                                    |                                                  |
-|                   [Pure-Go SQLite3 (WAL Modus)]                                       |
-|                                    |                                                  |
-|                        [Automated Sync & Backup Engine]                               |
-+---------------------------------------------------------------------------------------+
++------------------------------------+          +--------------------------------------------+
+|      sentinelbit Web-Tresor        |          |     sentinelbit Extension (Manifest V3)    |
+|   Master Password -> PBKDF2 100k   |          |  - Memory-Only Session (chrome.storage)    |
+|   AES-256-GCM Verschlüsselung      |          |  - Background Worker: Ctrl+Shift+L Hotkey  |
++-----------------+------------------+          |  - Badge Counter & Auto-Lock Timer         |
+                  |                             +---------------------+----------------------+
+                  | (Nur Ciphertexts & Auth-Hash)                     |
+                  +-------------------------+-------------------------+
+                                            |
+                                            v
++--------------------------------------------------------------------------------------------+
+|                            sentinelbit Daemon (Go Server v3.0.0)                           |
+|                                                                                            |
+|  [Chi Router]       [CORS Middleware]       [Rate Limiter]       [TOTP Replay Guard]       |
+|  [Security Headers] [Health /api/health]    [Ready /api/ready]   [Automated Sync & Backup] |
+|         |                  |                      |                       |                |
+|         +------------------+----------------------+-----------------------+                |
+|                                            |                                               |
+|                   [Pure-Go SQLite3 Engine (WAL Modus & Transaktionen)]                     |
+|                                            |                                               |
+|              [Rootless Alpine Container (UID 10001: sentinelbit:sentinelbit)]              |
++--------------------------------------------------------------------------------------------+
 ```
 
 ---
@@ -51,8 +56,12 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
   * Biometrisches Entsperren via **Windows Hello, Touch ID oder Fingerabdruck**.
 * ⏱️ **Integrierter 2FA Authenticator (TOTP)**:
   * Google-Authenticator-kompatibel inklusive QR-Code-Setup und Timing-Replay-Guard.
-* 🔌 **Anti-Phishing Browser Extension**:
-  * Chrome/Brave/Edge/Firefox-kompatibel (Manifest V3).
+* 🔌 **Browser Extension (Manifest V3 - Bitwarden-Parität)**:
+  * Chrome, Brave, Edge und Firefox kompatibel.
+  * **In-Memory Session Security**: Keine Klartext-Passwörter auf der Festplatte; flüchtiger Arbeitsspeicher-Cache.
+  * **Tastenkürzel `Ctrl+Shift+L`**: Sofortiges Ausfüllen der Logins auf Tastendruck.
+  * **Badge-Counter**: Zeigt die Anzahl passender Logins für die aktive Domain direkt im Icon an.
+  * **Auto-Lock Timer**: Sperrt den Tresor nach Inaktivität automatisch ab.
   * **Anti-Hidden-Trap Defense**: Verhindert das heimliche Ausfüllen unsichtbarer Phishing-Felder (`display: none`, `opacity: 0`, 1px-Traps oder Offscreen-Inputs).
 * 📥 **Universeller Multi-Manager Importer**:
   * Nahtloser 1-Klick-Import aus **Bitwarden** (JSON/CSV), **1Password** (1PUX/CSV), **KeePassXC** (CSV), **LastPass** sowie **Google Chrome** & **Mozilla Firefox**.
@@ -62,6 +71,8 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
   * Generiere auf Knopfdruck zufällige Relay-Aliase für Online-Registrierungen.
 * 🤝 **Asymmetrisches E2E Tresor-Sharing**:
   * Teile Passwörter sicher Ende-zu-Ende verschlüsselt mit RSA-OAEP + AES-256-GCM.
+* 🐳 **Rootless Container-Sicherheit**:
+  * Docker-Image läuft standardmäßig als unprivilegierter Benutzer (`sentinelbit:sentinelbit`, UID 10001).
 
 ---
 
@@ -154,13 +165,25 @@ go test -v ./...
 
 ---
 
-## 🔌 Browser-Erweiterung installieren
+## 🔌 Browser-Erweiterung (Chrome Web Store & Lokal)
 
+Die Erweiterung ist Manifest V3 konform und bietet dieselben Vorzüge wie Bitwarden (flüchtige In-Memory-Verschlüsselung, konfigurierbare Server-URL, Auto-Lock, Tastenkürzel und Badge-Counter):
+
+* **Tastenkombination**: Drücke **`Ctrl+Shift+L`** (oder **`Cmd+Shift+L`** auf Mac) auf jeder Webseite, um passende Zugangsdaten sofort auszufüllen.
+* **Auto-Lock**: Automatisches Sperren des Tresors nach einstellbarer Inaktivität (z.B. 15 Minuten).
+* **Self-Hosting Konfiguration**: Über das Zahnrad-Symbol ⚙️ im Unlock-Fenster kann jede beliebige Instanz-URL (`https://...`) hinterlegt und getestet werden.
+
+### Lokale Installation im Entwicklermodus:
 1. Öffne in Chrome, Brave oder Edge die URL: `chrome://extensions/`
 2. Aktiviere oben rechts den **Entwicklermodus** (*Developer mode*).
 3. Klicke auf **Entpackte Erweiterung laden** (*Load unpacked*).
 4. Wähle den Ordner `extension/` im Projektverzeichnis aus.
-5. Das sentinelbit-Icon erscheint in deiner Symbolleiste!
+
+### Paket für den Google Chrome Web Store bauen:
+```bash
+make extension-zip     # Erstellt das fertige dist/sentinelbit-extension.zip
+```
+Siehe die vollständige [Chrome Web Store Anleitung (CHROME_STORE_GUIDE.md)](CHROME_STORE_GUIDE.md) für alle Einreichungs- und Review-Schritte.
 
 ---
 
@@ -168,13 +191,26 @@ go test -v ./...
 
 | Schutzmechanismus | Technische Umsetzung |
 | :--- | :--- |
-| **Kryptografie** | PBKDF2-HMAC-SHA256 (100k Iterationen), AES-256-GCM |
-| **Passkeys** | FIDO2 P-256 (ES256) ECDSA WebAuthn |
+| **Kryptografie** | PBKDF2-HMAC-SHA256 (100k Iterationen), AES-256-GCM mit Random-IV |
+| **Passkeys** | FIDO2 P-256 (ES256) ECDSA WebAuthn Hardware-Schlüssel |
+| **Extension Storage** | In-Memory Session Storage (`chrome.storage.session`) – keine Passwörter auf Festplatte |
 | **Brute-Force Schutz** | In-Memory Token-Bucket Rate Limiter (5 Versuche / 15 Min Block) |
 | **Replay Schutz** | Time-based Sliding Window Guard für TOTP-Tokens (90s Drift) |
 | **Anti-Enumeration** | Timing-sichere HMAC Dummy-Salts für unbekannte Benutzer |
+| **CORS & Preflight** | Dedizierte Whitelist für Browser-Erweiterungen (`chrome-extension://*`) & Preflight-Handler |
 | **Anti-Phishing Autofill** | DOM Bounding-Box, Opacity & Visibility Check gegen Trap-Inputs |
 | **HTTP Hardening** | Strikte CSP, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` |
+| **Container Hardening**| Rootless Alpine-Container unter unprivilegiertem System-User (`UID 10001`) |
+| **Readiness & Health** | Separate Liveness- (`/api/health`) und Readiness-Probes (`/api/ready`) |
+
+---
+
+## 📚 Weiterführende Dokumentation
+
+* 📖 **[REST API Spezifikation (API.md)](API.md)** – Vollständige Dokumentation aller HTTP-Endpunkte, Payloads und Error-Codes.
+* 🏪 **[Chrome Web Store Guide (CHROME_STORE_GUIDE.md)](CHROME_STORE_GUIDE.md)** – Anleitung, Texte und Review-Begründungen für die Google Developer Console.
+* 🛡️ **[Datenschutzerklärung (PRIVACY.md)](PRIVACY.md)** – Offizielle DSGVO- und Store-konforme Datenschutzerklärung.
+* 🔌 **[Browser-Erweiterung Handbuch (extension/README.md)](extension/README.md)** – Technische Architektur und Entwickler-Dokumentation der Extension.
 
 ---
 

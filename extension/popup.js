@@ -129,10 +129,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupGenerator();
   setupHeaderButtons();
   setupLoginForm();
+  setupSettings();
 
   await checkServerHealth();
   await detectActiveTab();
-  loadCachedVault();
+  await loadCachedVault();
 });
 
 // =============================================================
@@ -236,40 +237,62 @@ function matchesDomain(item, currentHostname) {
 // 5. VAULT CACHE LOADING & RENDERING
 // =============================================================
 
-function loadCachedVault() {
-  chrome.storage.local.get(["vault_cache", "last_synced", "vault_user"], (res) => {
-    allVaultItems = res.vault_cache || [];
-    const count = allVaultItems.length;
-    const syncInfo = document.getElementById("sync-info");
-    const lockBtn = document.getElementById("btn-lock");
-    const viewUnlock = document.getElementById("view-unlock");
-    const viewMain = document.getElementById("view-main");
+async function loadCachedVault() {
+  chrome.runtime.sendMessage({ action: "TOUCH_ACTIVITY" }, () => {});
 
-    if (count > 0) {
-      if (viewUnlock) viewUnlock.style.display = "none";
-      if (viewMain) viewMain.style.display = "block";
-      if (lockBtn) lockBtn.style.display = "flex";
-
-      if (res.last_synced) {
-        const minutesAgo = Math.floor((Date.now() - res.last_synced) / 60000);
-        syncInfo.innerText = `${count} Logins (${minutesAgo === 0 ? "gerade" : `vor ${minutesAgo}m`})`;
-      } else {
-        syncInfo.innerText = `${count} Logins`;
-      }
-      renderItems();
-    } else {
-      // Locked or empty: show unlock view
-      if (viewUnlock) viewUnlock.style.display = "block";
-      if (viewMain) viewMain.style.display = "none";
-      if (lockBtn) lockBtn.style.display = "none";
-      syncInfo.innerText = "Nicht verbunden";
-
-      if (res.vault_user) {
-        const userInput = document.getElementById("popup-login-user");
-        if (userInput && !userInput.value) userInput.value = res.vault_user;
+  let items = [];
+  if (chrome.storage.session) {
+    const sess = await new Promise(r => chrome.storage.session.get(["vault_cache"], r));
+    if (sess && sess.vault_cache) items = sess.vault_cache;
+  }
+  // Check if legacy fallback exists in local storage
+  if (items.length === 0) {
+    const local = await new Promise(r => chrome.storage.local.get(["vault_cache"], r));
+    if (local && local.vault_cache && local.vault_cache.length > 0) {
+      items = local.vault_cache;
+      if (chrome.storage.session) {
+        await new Promise(r => chrome.storage.session.set({ vault_cache: items }, r));
+        await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
       }
     }
-  });
+  }
+
+  const meta = await new Promise(r => chrome.storage.local.get(["last_synced", "vault_user"], r));
+
+  allVaultItems = items;
+  const count = allVaultItems.length;
+  const syncInfo = document.getElementById("sync-info");
+  const lockBtn = document.getElementById("btn-lock");
+  const viewUnlock = document.getElementById("view-unlock");
+  const viewMain = document.getElementById("view-main");
+  const viewSettings = document.getElementById("view-settings");
+
+  if (viewSettings) viewSettings.style.display = "none";
+
+  if (count > 0) {
+    if (viewUnlock) viewUnlock.style.display = "none";
+    if (viewMain) viewMain.style.display = "block";
+    if (lockBtn) lockBtn.style.display = "flex";
+
+    if (meta.last_synced) {
+      const minutesAgo = Math.floor((Date.now() - meta.last_synced) / 60000);
+      syncInfo.innerText = `${count} Logins (${minutesAgo === 0 ? "gerade" : `vor ${minutesAgo}m`})`;
+    } else {
+      syncInfo.innerText = `${count} Logins`;
+    }
+    renderItems();
+  } else {
+    // Locked or empty: show unlock view
+    if (viewUnlock) viewUnlock.style.display = "block";
+    if (viewMain) viewMain.style.display = "none";
+    if (lockBtn) lockBtn.style.display = "none";
+    syncInfo.innerText = "Nicht verbunden / Gesperrt";
+
+    if (meta.vault_user) {
+      const userInput = document.getElementById("popup-login-user");
+      if (userInput && !userInput.value) userInput.value = meta.vault_user;
+    }
+  }
 
   const searchInput = document.getElementById("ext-search");
   if (searchInput) {
@@ -497,24 +520,33 @@ async function loginAndSyncDirectly(username, password, totpCode) {
     }
   }
 
-  // Step 6: Save in extension storage
+  // Step 6: Save decrypted items strictly in-memory (session storage)
+  if (chrome.storage.session) {
+    await chrome.storage.session.set({ vault_cache: logins });
+  }
+  // Store only non-sensitive metadata in persistent local storage
   await chrome.storage.local.set({
-    vault_cache: logins,
     vault_user: username,
     last_synced: Date.now()
   });
+  // Purge any legacy plain passwords from persistent storage
+  await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
 
   allVaultItems = logins;
-  loadCachedVault();
+  chrome.runtime.sendMessage({ action: "VAULT_UNLOCKED" }, () => {});
+  await loadCachedVault();
   showToast(`Erfolgreich! ${logins.length} Logins bereit.`);
 }
 
-function lockExtension() {
-  chrome.storage.local.set({ vault_cache: [] }, () => {
-    allVaultItems = [];
-    loadCachedVault();
-    showToast("Erweiterung gesperrt 🔒");
-  });
+async function lockExtension() {
+  if (chrome.storage.session) {
+    await chrome.storage.session.clear();
+  }
+  await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
+  allVaultItems = [];
+  chrome.runtime.sendMessage({ action: "VAULT_LOCKED" }, () => {});
+  await loadCachedVault();
+  showToast("Erweiterung gesperrt 🔒");
 }
 
 // =============================================================
@@ -700,14 +732,15 @@ async function handleTotpCopy(secret) {
 function setupHeaderButtons() {
   const syncBtn = document.getElementById("btn-sync");
   const lockBtn = document.getElementById("btn-lock");
+  const settingsBtn = document.getElementById("btn-settings");
 
   if (syncBtn) {
     syncBtn.addEventListener("click", async () => {
       syncBtn.classList.add("spinning");
       await triggerOpenAndSyncVault();
-      setTimeout(() => {
+      setTimeout(async () => {
         syncBtn.classList.remove("spinning");
-        loadCachedVault();
+        await loadCachedVault();
         showToast("Sync abgeschlossen ✓");
       }, 1000);
     });
@@ -715,6 +748,89 @@ function setupHeaderButtons() {
 
   if (lockBtn) {
     lockBtn.addEventListener("click", lockExtension);
+  }
+
+  if (settingsBtn) {
+    settingsBtn.addEventListener("click", () => {
+      const settingsView = document.getElementById("view-settings");
+      if (!settingsView) return;
+      const isOpen = settingsView.style.display === "block";
+      settingsView.style.display = isOpen ? "none" : "block";
+      if (!isOpen) {
+        document.getElementById("setting-server-url").value = SERVER_URL;
+        chrome.storage.local.get(["auto_lock_minutes"], (res) => {
+          if (res && res.auto_lock_minutes !== undefined) {
+            document.getElementById("setting-autolock").value = String(res.auto_lock_minutes);
+          }
+        });
+      }
+    });
+  }
+}
+
+function setupSettings() {
+  const btnClose = document.getElementById("btn-close-settings");
+  const btnSave = document.getElementById("btn-save-settings");
+  const btnTest = document.getElementById("btn-test-connection");
+  const statusMsg = document.getElementById("settings-status-msg");
+
+  if (btnClose) {
+    btnClose.addEventListener("click", () => {
+      const settingsView = document.getElementById("view-settings");
+      if (settingsView) settingsView.style.display = "none";
+    });
+  }
+
+  if (btnTest) {
+    btnTest.addEventListener("click", async () => {
+      const inputUrl = (document.getElementById("setting-server-url").value || "").trim().replace(/\/+$/, "");
+      if (!inputUrl) {
+        statusMsg.innerText = "Bitte eine gültige URL angeben";
+        statusMsg.style.color = "#f87171";
+        return;
+      }
+      statusMsg.innerText = "⏳ Prüfe Verbindung...";
+      statusMsg.style.color = "#9ca3af";
+      const start = performance.now();
+      try {
+        const res = await fetch(`${inputUrl}/api/health`, { method: "GET", cache: "no-store" });
+        const latency = Math.round(performance.now() - start);
+        if (res.ok) {
+          const data = await res.json();
+          statusMsg.innerText = `✓ Verbunden (${latency}ms, v${data.version || '3.0.0'})`;
+          statusMsg.style.color = "#34d399";
+        } else {
+          statusMsg.innerText = `Fehler: HTTP ${res.status}`;
+          statusMsg.style.color = "#f87171";
+        }
+      } catch (err) {
+        statusMsg.innerText = "Keine Verbindung zum Server möglich";
+        statusMsg.style.color = "#f87171";
+      }
+    });
+  }
+
+  if (btnSave) {
+    btnSave.addEventListener("click", async () => {
+      let inputUrl = (document.getElementById("setting-server-url").value || "").trim().replace(/\/+$/, "");
+      if (!inputUrl) inputUrl = "http://127.0.0.1:8000";
+      const autolockVal = parseInt(document.getElementById("setting-autolock").value || "15", 10);
+
+      SERVER_URL = inputUrl;
+      await new Promise(r => chrome.storage.local.set({
+        server_url: inputUrl,
+        auto_lock_minutes: autolockVal
+      }, r));
+
+      const footerLink = document.getElementById("footer-vault-link");
+      if (footerLink) footerLink.href = SERVER_URL;
+
+      const settingsView = document.getElementById("view-settings");
+      if (settingsView) settingsView.style.display = "none";
+
+      await checkServerHealth();
+      showToast("Einstellungen gespeichert ✓");
+    });
   }
 }
 

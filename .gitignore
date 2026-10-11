@@ -18,6 +18,8 @@ sentinelbit-cli
 .env
 
 # Temporary & Test Dirs
+dist/
+*.zip
 test_sync_output/
 backups/
 data/

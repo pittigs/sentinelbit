@@ -105,7 +105,36 @@
     <div class="header-actions">
       <span class="status-badge" id="server-status">Prüfe...</span>
       <button class="btn-icon" id="btn-sync" title="Jetzt aus geöffnetem Web-Tresor synchronisieren">🔄</button>
+      <button class="btn-icon" id="btn-settings" title="Server & Auto-Lock Einstellungen">⚙️</button>
       <button class="btn-icon" id="btn-lock" title="Erweiterung sperren" style="display: none;">🔒</button>
+    </div>
+  </div>
+
+  <!-- VIEW C: SETTINGS FORM -->
+  <div id="view-settings" style="display: none; margin-bottom: 10px;">
+    <div class="unlock-card" style="text-align: left; padding: 14px;">
+      <div style="font-weight: 700; font-size: 0.92rem; color: #60a5fa; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+        <span>⚙️ Einstellungen</span>
+        <button class="btn-icon" id="btn-close-settings" title="Schließen" style="width: 22px; height: 22px;">✕</button>
+      </div>
+
+      <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Server-URL (Self-Hosted):</label>
+      <input type="url" id="setting-server-url" class="search-input" placeholder="http://127.0.0.1:8000" style="margin-bottom: 10px;">
+
+      <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Automatisches Sperren (Auto-Lock):</label>
+      <select id="setting-autolock" class="search-input" style="margin-bottom: 12px; cursor: pointer; background: #1f2937; color: white;">
+        <option value="5">Nach 5 Minuten Inaktivität</option>
+        <option value="15" selected>Nach 15 Minuten Inaktivität</option>
+        <option value="30">Nach 30 Minuten Inaktivität</option>
+        <option value="60">Nach 1 Stunde Inaktivität</option>
+        <option value="0">Nie (Nur bei Browser-Schließen)</option>
+      </select>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button type="button" class="btn btn-secondary" id="btn-test-connection" style="flex: 1; padding: 7px;">📶 Verbindung prüfen</button>
+        <button type="button" class="btn" id="btn-save-settings" style="flex: 1; padding: 7px;">💾 Speichern</button>
+      </div>
+      <div id="settings-status-msg" style="font-size: 0.74rem; text-align: center; color: var(--text-muted); min-height: 16px;"></div>
     </div>
   </div>
 

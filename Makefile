@@ -9,7 +9,7 @@ CLI_PATH=./cmd/cli
 BUILD_DIR=./bin
 LDFLAGS=-s -w
 
-.PHONY: all build build-server build-cli run test clean docker docker-run build-pi build-linux build-windows
+.PHONY: all build build-server build-cli run test clean docker docker-run build-pi build-linux build-windows extension-zip
 
 all: build
 
@@ -74,8 +74,15 @@ docker-run:
 	@echo "🐳 Starte Container via Docker Compose..."
 	docker compose up -d
 
+## extension-zip: Packt die Browser Extension für den Google Chrome Web Store
+extension-zip:
+	@echo "📦 Packe Chrome Extension für Web Store..."
+	@mkdir -p dist
+	@python3 -c "import zipfile, os; z = zipfile.ZipFile('dist/sentinelbit-extension.zip', 'w', zipfile.ZIP_DEFLATED); [z.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), 'extension')) for root, _, files in os.walk('extension') for f in files if not f.startswith('.') and not f.endswith('~')]; z.close()"
+	@echo "✅ Fertig: dist/sentinelbit-extension.zip"
+
 ## clean: Löscht kompilierte Binärdateien
 clean:
 	@echo "🧹 Bereinige Build-Artefakte..."
-	rm -rf $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR) dist
 	@echo "✅ Bereinigt."
