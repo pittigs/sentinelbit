@@ -112,6 +112,72 @@ func HandleCreateVaultItem(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+type BatchVaultItemCreate struct {
+	Items []models.VaultItemCreate `json:"items"`
+}
+
+func HandleBatchCreateVaultItems(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserFromCtx(r)
+		var req BatchVaultItemCreate
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			HTTPError(w, "Ungültiges JSON", http.StatusBadRequest)
+			return
+		}
+
+		if len(req.Items) == 0 {
+			JSONResponse(w, map[string]interface{}{"inserted": 0}, http.StatusOK)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			HTTPError(w, "Transaktionsfehler: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		stmt, err := tx.Prepare(`
+			INSERT INTO vault_items (id, user_id, type, title, folder, favorite, encrypted_payload, created_at, updated_at, deleted_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+		`)
+		if err != nil {
+			HTTPError(w, "Statement-Fehler: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer stmt.Close()
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		inserted := 0
+		for _, item := range req.Items {
+			fav := 0
+			if item.Favorite {
+				fav = 1
+			}
+			itemId := uuid.New().String()
+			_, err := stmt.Exec(itemId, user.UserId, item.Type, item.Title, item.Folder, fav, item.EncryptedPayload, now, now)
+			if err != nil {
+				HTTPError(w, "Fehler beim Importieren: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			inserted++
+		}
+
+		if err := tx.Commit(); err != nil {
+			HTTPError(w, "Commit-Fehler: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Trigger backup ONCE after the entire batch is committed
+		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+
+		JSONResponse(w, map[string]interface{}{
+			"inserted": inserted,
+			"message":  "Erfolgreich importiert",
+		}, http.StatusOK)
+	}
+}
+
 func HandleUpdateVaultItem(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := GetUserFromCtx(r)

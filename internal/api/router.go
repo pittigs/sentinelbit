@@ -80,6 +80,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 		api.Route("/vault", func(vault chi.Router) {
 			vault.Get("/items", RequireAuth(HandleListVaultItems(database)))
 			vault.Post("/items", RequireAuth(HandleCreateVaultItem(database)))
+			vault.Post("/items/batch", RequireAuth(HandleBatchCreateVaultItems(database)))
 			vault.Delete("/items/all", RequireAuth(HandleClearVault(database)))
 			vault.Put("/items/{itemId}", RequireAuth(HandleUpdateVaultItem(database)))
 			vault.Delete("/items/{itemId}", RequireAuth(HandleDeleteVaultItem(database)))

@@ -1413,9 +1413,26 @@ async function renderVaultItems() {
   }
   emptyState.style.display = "none";
 
-  // If tab is 'all', also display passkeys
+  // If tab is 'all', also display passkeys that do NOT have a corresponding login item
   if (activeTab === 'all') {
-    renderPasskeyCards(passkeysList.filter(pk => 
+    const standalonePasskeys = passkeysList.filter(pk => {
+      const hasMatchingLogin = decryptedItems.some(it => {
+        if (it.type !== "login") return false;
+        const itemHost = (extractDomain(it.data?.url) || "").toLowerCase();
+        const itemUser = (it.data?.username || "").toLowerCase().trim();
+        const itemTitle = (it.title || "").toLowerCase().trim();
+        const pkUser = (pk.username || "").toLowerCase().trim();
+        const pkRp = (pk.rp_id || "").toLowerCase().trim();
+        const pkName = (pk.rp_name || "").toLowerCase().trim();
+        const userMatches = (!itemUser && !pkUser) || (itemUser && pkUser && itemUser === pkUser);
+        const domainMatches = (itemHost && pkRp && (itemHost === pkRp || pkRp.includes(itemHost) || itemHost.includes(pkRp)));
+        const titleMatches = (itemTitle && pkName && (itemTitle.includes(pkName) || pkName.includes(itemTitle)));
+        return userMatches && (domainMatches || titleMatches);
+      });
+      return !hasMatchingLogin;
+    });
+
+    renderPasskeyCards(standalonePasskeys.filter(pk => 
       pk.rp_id.toLowerCase().includes(query) || 
       pk.rp_name.toLowerCase().includes(query) || 
       pk.username.toLowerCase().includes(query)
@@ -1441,6 +1458,24 @@ async function renderVaultItems() {
           </div>
         `;
       }
+    }
+
+    let matchingPk = null;
+    if (item.type === "login") {
+      const itemHost = (extractDomain(item.data?.url) || "").toLowerCase();
+      const itemUser = (item.data?.username || "").toLowerCase().trim();
+      const itemTitle = (item.title || "").toLowerCase().trim();
+
+      matchingPk = passkeysList.find(pk => {
+        if (pk.vault_item_id && pk.vault_item_id === item.id) return true;
+        const pkUser = (pk.username || "").toLowerCase().trim();
+        const pkRp = (pk.rp_id || "").toLowerCase().trim();
+        const pkName = (pk.rp_name || "").toLowerCase().trim();
+        const userMatches = (!itemUser && !pkUser) || (itemUser && pkUser && itemUser === pkUser);
+        const domainMatches = (itemHost && pkRp && (itemHost === pkRp || pkRp.includes(itemHost) || itemHost.includes(pkRp)));
+        const titleMatches = (itemTitle && pkName && (itemTitle.includes(pkName) || pkName.includes(itemTitle)));
+        return userMatches && (domainMatches || titleMatches);
+      });
     }
 
     let contentHtml = "";
@@ -1474,6 +1509,13 @@ async function renderVaultItems() {
             <span class="totp-code-compact" id="totp-val-${item.id}">------</span>
             <span class="totp-timer-compact" id="totp-sec-${item.id}">30s</span>
             <button class="btn-icon" style="padding: 2px;" onclick="event.stopPropagation(); copyTotpCode('${item.id}')" title="Code kopieren">📋</button>
+          </div>
+        ` : ''}
+
+        ${matchingPk ? `
+          <div class="passkey-pill-compact" style="display: flex; align-items: center; justify-content: space-between; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: var(--radius-sm); padding: 3px 8px; font-size: 0.72rem; gap: 6px;">
+            <span style="color: #c4b5fd; font-weight: 600;">⚡ Passkey</span>
+            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="event.stopPropagation(); testPasskeyAssertion('${matchingPk.id}')" title="WebAuthn Simulation">Testen</button>
           </div>
         ` : ''}
 
@@ -1518,6 +1560,7 @@ async function renderVaultItems() {
           <div class="card-title" title="${escapeHtml(item.title)}">
             ${escapeHtml(item.title)}
             ${item.folder ? `<span class="badge" style="font-size: 0.68rem; margin-left: 6px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500;">📁 ${escapeHtml(item.folder)}</span>` : ''}
+            ${matchingPk ? `<span class="badge badge-passkey" style="font-size: 0.68rem; margin-left: 6px; padding: 2px 6px;" title="Passkey (FIDO2) hinterlegt">⚡ FIDO2</span>` : ''}
           </div>
           <div class="card-subtitle" title="${escapeHtml(item.data.url || item.folder || '')}">${escapeHtml(item.data.url || item.folder || 'Keine URL')}</div>
         </div>
@@ -2877,6 +2920,19 @@ async function importVault() {
       const content = e.target.result;
       let itemsToImport = [];
       let passkeysToImport = [];
+      let skippedExisting = 0;
+
+      // Existing items signatures for deduplication (prevents duplicate cards upon re-import)
+      const existingSignatures = new Set(
+        decryptedItems.map(it => {
+          const u = (it.data?.username || "").toLowerCase().trim();
+          const p = (it.data?.password || "").trim();
+          const t = (it.title || "").toLowerCase().trim();
+          const d = (extractDomain(it.data?.url) || "").toLowerCase().trim();
+          return `${t}|${d}|${u}|${p}`;
+        })
+      );
+      const existingCredIds = new Set(passkeysList.map(pk => pk.credential_id));
 
       // Determine format: Try JSON first, fallback to CSV
       let json = null;
@@ -2914,6 +2970,8 @@ async function importVault() {
             // Check for Bitwarden Passkeys (fido2Credentials)
             if (it.login && it.login.fido2Credentials && Array.isArray(it.login.fido2Credentials) && it.login.fido2Credentials.length > 0) {
               for (const cred of it.login.fido2Credentials) {
+                if (cred.credentialId && existingCredIds.has(cred.credentialId)) continue;
+                if (cred.credentialId) existingCredIds.add(cred.credentialId);
                 passkeysToImport.push({
                   vault_item_id: "",
                   rp_id: cred.rpId || extractDomain(it.login?.uris?.[0]?.uri) || (it.name ? it.name.toLowerCase().replace(/\s+/g, '') + ".com" : "unknown.com"),
@@ -2976,6 +3034,13 @@ async function importVault() {
               const username = (it.login && it.login.username) ? it.login.username : "";
               const password = (it.login && it.login.password) ? it.login.password : "";
               const totp = (it.login && it.login.totp) ? it.login.totp : "";
+
+              const sign = `${title.toLowerCase().trim()}|${(extractDomain(url) || "").toLowerCase().trim()}|${username.toLowerCase().trim()}|${password.trim()}`;
+              if (existingSignatures.has(sign)) {
+                skippedExisting++;
+                continue;
+              }
+              existingSignatures.add(sign);
 
               const encPayload = await encryptPayload({
                 url,
@@ -3185,6 +3250,13 @@ async function importVault() {
               itemsToImport.push({ type: "card", title, favorite: fav, encrypted_payload: encPayload });
             } else {
               if (user || pass || url || rawTitle || notes) {
+                const sign = `${title.toLowerCase().trim()}|${(extractDomain(url) || "").toLowerCase().trim()}|${user.toLowerCase().trim()}|${pass.trim()}`;
+                if (existingSignatures.has(sign)) {
+                  skippedExisting++;
+                  continue;
+                }
+                existingSignatures.add(sign);
+
                 const encPayload = await encryptPayload({
                   url,
                   username: user,
@@ -3207,25 +3279,61 @@ async function importVault() {
       }
 
       if (itemsToImport.length === 0 && passkeysToImport.length === 0) {
+        if (skippedExisting > 0) {
+          closeModal("modal-backup");
+          showToast(`Alle ${skippedExisting} Einträge aus der Datei sind bereits ohne Duplikate in deinem Tresor vorhanden!`, "info");
+          return;
+        }
         throw new Error("Keine kompatiblen Einträge in der Datei gefunden. Unterstützt: Bitwarden JSON/CSV, sentinelbit Backup, 1Password, KeePassXC, Chrome/Firefox CSV.");
       }
 
-      // Concurrently batch-save all items in chunks of 8
+      // Fast atomic batch import via /api/vault/items/batch
       let count = 0;
-      const BATCH_SIZE = 8;
+      const BATCH_SIZE = 100;
       for (let i = 0; i < itemsToImport.length; i += BATCH_SIZE) {
         const batch = itemsToImport.slice(i, i + BATCH_SIZE);
-        await Promise.all(batch.map(item =>
-          fetch("/api/vault/items", {
+        try {
+          const res = await fetch("/api/vault/items/batch", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${sessionToken}`
             },
-            body: JSON.stringify(item)
-          })
-        ));
-        count += batch.length;
+            body: JSON.stringify({ items: batch })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            count += (data.inserted !== undefined ? data.inserted : batch.length);
+          } else {
+            // Fallback for older server versions: sequential individual POST
+            for (const item of batch) {
+              const sRes = await fetch("/api/vault/items", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify(item)
+              });
+              if (sRes.ok) count++;
+            }
+          }
+        } catch (e) {
+          // Fallback sequential
+          for (const item of batch) {
+            try {
+              const sRes = await fetch("/api/vault/items", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify(item)
+              });
+              if (sRes.ok) count++;
+            } catch (err) {}
+          }
+        }
         if (importBtn) {
           importBtn.innerText = `⏳ Importiere (${count}/${itemsToImport.length})...`;
         }
@@ -3235,7 +3343,7 @@ async function importVault() {
       let pkCount = 0;
       for (const pk of passkeysToImport) {
         try {
-          await fetch("/api/passkeys", {
+          const pkRes = await fetch("/api/passkeys", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -3243,16 +3351,19 @@ async function importVault() {
             },
             body: JSON.stringify(pk)
           });
-          pkCount++;
+          if (pkRes.ok) pkCount++;
         } catch (e) {
           console.warn("Passkey Import-Fehler:", e);
         }
       }
 
       closeModal("modal-backup");
-      const msg = pkCount > 0 
-        ? `${count} Einträge und ${pkCount} Passkeys erfolgreich importiert!`
-        : `${count} Einträge erfolgreich importiert!`;
+      let msg = `${count} Einträge`;
+      if (pkCount > 0) msg += ` und ${pkCount} Passkeys`;
+      msg += " erfolgreich importiert!";
+      if (skippedExisting > 0) {
+        msg += ` (${skippedExisting} bereits vorhandene Duplikate übersprungen)`;
+      }
       showToast(msg, "success");
       await loadVault();
     } catch (err) {
