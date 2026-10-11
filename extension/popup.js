@@ -23,8 +23,10 @@ async function loadServerUrl() {
 }
 
 let allVaultItems = [];
+let allVaultPasskeys = [];
 let activeHostname = "";
 let showAllItemsMode = false;
+let showAllPasskeysMode = false;
 let currentGeneratedPassword = "";
 
 // =============================================================
@@ -241,13 +243,15 @@ async function loadCachedVault() {
   chrome.runtime.sendMessage({ action: "TOUCH_ACTIVITY" }, () => {});
 
   let items = [];
+  let passkeys = [];
   if (chrome.storage.session) {
-    const sess = await new Promise(r => chrome.storage.session.get(["vault_cache"], r));
+    const sess = await new Promise(r => chrome.storage.session.get(["vault_cache", "vault_passkeys"], r));
     if (sess && sess.vault_cache) items = sess.vault_cache;
+    if (sess && sess.vault_passkeys) passkeys = sess.vault_passkeys;
   }
   // Check if legacy fallback exists in local storage
   if (items.length === 0) {
-    const local = await new Promise(r => chrome.storage.local.get(["vault_cache"], r));
+    const local = await new Promise(r => chrome.storage.local.get(["vault_cache", "vault_passkeys"], r));
     if (local && local.vault_cache && local.vault_cache.length > 0) {
       items = local.vault_cache;
       if (chrome.storage.session) {
@@ -255,12 +259,21 @@ async function loadCachedVault() {
         await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
       }
     }
+    if (local && local.vault_passkeys && local.vault_passkeys.length > 0) {
+      passkeys = local.vault_passkeys;
+      if (chrome.storage.session) {
+        await new Promise(r => chrome.storage.session.set({ vault_passkeys: passkeys }, r));
+        await new Promise(r => chrome.storage.local.remove(["vault_passkeys"], r));
+      }
+    }
   }
 
   const meta = await new Promise(r => chrome.storage.local.get(["last_synced", "vault_user"], r));
 
   allVaultItems = items;
+  allVaultPasskeys = passkeys;
   const count = allVaultItems.length;
+  const pkCount = allVaultPasskeys.length;
   const syncInfo = document.getElementById("sync-info");
   const lockBtn = document.getElementById("btn-lock");
   const viewUnlock = document.getElementById("view-unlock");
@@ -269,18 +282,20 @@ async function loadCachedVault() {
 
   if (viewSettings) viewSettings.style.display = "none";
 
-  if (count > 0) {
+  if (count > 0 || pkCount > 0) {
     if (viewUnlock) viewUnlock.style.display = "none";
     if (viewMain) viewMain.style.display = "block";
     if (lockBtn) lockBtn.style.display = "flex";
 
+    const pkBadge = pkCount > 0 ? ` · ${pkCount} ⚡ Passkeys` : '';
     if (meta.last_synced) {
       const minutesAgo = Math.floor((Date.now() - meta.last_synced) / 60000);
-      syncInfo.innerText = `${count} Logins (${minutesAgo === 0 ? "gerade" : `vor ${minutesAgo}m`})`;
+      syncInfo.innerText = `${count} Logins${pkBadge} (${minutesAgo === 0 ? "gerade" : `vor ${minutesAgo}m`})`;
     } else {
-      syncInfo.innerText = `${count} Logins`;
+      syncInfo.innerText = `${count} Logins${pkBadge}`;
     }
     renderItems();
+    renderPasskeys();
   } else {
     // Locked or empty: show unlock view
     if (viewUnlock) viewUnlock.style.display = "block";
@@ -308,6 +323,21 @@ async function loadCachedVault() {
       renderItems();
     });
   }
+
+  const pkSearchInput = document.getElementById("passkey-search");
+  if (pkSearchInput) {
+    pkSearchInput.addEventListener("input", renderPasskeys);
+  }
+
+  const toggleAllPkBtn = document.getElementById("btn-toggle-all-passkeys");
+  if (toggleAllPkBtn) {
+    toggleAllPkBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      showAllPasskeysMode = !showAllPasskeysMode;
+      toggleAllPkBtn.innerText = showAllPasskeysMode ? "Nur diese Seite" : "Alle anzeigen";
+      renderPasskeys();
+    });
+  }
 }
 
 function renderItems() {
@@ -316,6 +346,34 @@ function renderItems() {
 
   const query = (document.getElementById("ext-search")?.value || "").toLowerCase().trim();
   listEl.innerHTML = "";
+
+  // If there are matching passkeys for this domain, highlight them at the top
+  if (!showAllItemsMode && activeHostname && allVaultPasskeys.length > 0 && !query) {
+    const matchingPk = allVaultPasskeys.filter(pk => matchesDomain({ url: pk.rp_id, title: pk.rp_name }, activeHostname));
+    if (matchingPk.length > 0) {
+      const pkBanner = document.createElement("div");
+      pkBanner.style.padding = "8px 10px";
+      pkBanner.style.marginBottom = "8px";
+      pkBanner.style.borderRadius = "6px";
+      pkBanner.style.background = "rgba(139, 92, 246, 0.15)";
+      pkBanner.style.border = "1px solid rgba(139, 92, 246, 0.35)";
+      pkBanner.style.display = "flex";
+      pkBanner.style.alignItems = "center";
+      pkBanner.style.justifyContent = "space-between";
+      pkBanner.innerHTML = `
+        <span style="font-size: 0.76rem; color: #c4b5fd; font-weight: 600;">
+          ⚡ ${matchingPk.length} FIDO2 Passkey aktiv
+        </span>
+        <button class="btn btn-secondary" id="btn-goto-pk-tab" style="padding: 2px 8px; font-size: 0.72rem;">
+          Anzeigen
+        </button>
+      `;
+      listEl.appendChild(pkBanner);
+      pkBanner.querySelector("#btn-goto-pk-tab")?.addEventListener("click", () => {
+        document.getElementById("tab-btn-passkeys")?.click();
+      });
+    }
+  }
 
   if (allVaultItems.length === 0) {
     return;
@@ -339,7 +397,7 @@ function renderItems() {
 
   if (filtered.length === 0) {
     if (!showAllItemsMode && activeHostname) {
-      listEl.innerHTML = `
+      listEl.innerHTML += `
         <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
           Kein Eintrag für <strong>${escapeHtml(activeHostname)}</strong> gefunden.<br>
           <button class="btn btn-secondary" id="btn-show-all-empty" style="margin-top: 10px; font-size: 0.75rem;">
@@ -351,7 +409,7 @@ function renderItems() {
         document.getElementById("btn-toggle-all")?.click();
       });
     } else {
-      listEl.innerHTML = `
+      listEl.innerHTML += `
         <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
           Keine passenden Einträge für deine Suche gefunden.
         </div>
@@ -379,14 +437,99 @@ function renderItems() {
       </div>
     `;
 
-    // Action handlers
-    card.querySelector(".btn-autofill").onclick = () => executeAutofill(it.username, it.password);
+    // Action handlers: automatically include TOTP when autofilling
+    card.querySelector(".btn-autofill").onclick = () => executeAutofill(it.username, it.password, it.totp);
     card.querySelector(".btn-copy-pwd").onclick = () => copyText(it.password, "Passwort kopiert! ✓");
 
     const totpBtn = card.querySelector(".btn-totp");
     if (totpBtn) {
       totpBtn.onclick = () => handleTotpCopy(it.totp);
     }
+
+    listEl.appendChild(card);
+  }
+}
+
+function renderPasskeys() {
+  const listEl = document.getElementById("passkeys-list");
+  if (!listEl) return;
+
+  const query = (document.getElementById("passkey-search")?.value || "").toLowerCase().trim();
+  listEl.innerHTML = "";
+
+  if (allVaultPasskeys.length === 0) {
+    listEl.innerHTML = `
+      <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
+        Keine FIDO2 Passkeys hinterlegt.
+      </div>
+    `;
+    return;
+  }
+
+  let filtered = allVaultPasskeys.filter(pk => {
+    if (query) {
+      const mRp = (pk.rp_name && pk.rp_name.toLowerCase().includes(query)) || (pk.rp_id && pk.rp_id.toLowerCase().includes(query));
+      const mUser = pk.username && pk.username.toLowerCase().includes(query);
+      return mRp || mUser;
+    }
+
+    if (!showAllPasskeysMode && activeHostname) {
+      return matchesDomain({ url: pk.rp_id, title: pk.rp_name }, activeHostname);
+    }
+
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    if (!showAllPasskeysMode && activeHostname) {
+      listEl.innerHTML = `
+        <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
+          Kein Passkey für <strong>${escapeHtml(activeHostname)}</strong> gefunden.<br>
+          <button class="btn btn-secondary" id="btn-show-all-pk-empty" style="margin-top: 10px; font-size: 0.75rem;">
+            Alle ${allVaultPasskeys.length} Passkeys anzeigen
+          </button>
+        </div>
+      `;
+      document.getElementById("btn-show-all-pk-empty")?.addEventListener("click", () => {
+        document.getElementById("btn-toggle-all-passkeys")?.click();
+      });
+    } else {
+      listEl.innerHTML = `
+        <div style="font-size: 0.8rem; color: #9ca3af; text-align: center; padding: 24px 0;">
+          Keine passenden Passkeys gefunden.
+        </div>
+      `;
+    }
+    return;
+  }
+
+  for (const pk of filtered) {
+    const card = document.createElement("div");
+    card.className = "item-card";
+    card.style.border = "1px solid rgba(139, 92, 246, 0.4)";
+    card.style.background = "rgba(139, 92, 246, 0.08)";
+
+    card.innerHTML = `
+      <div class="item-header">
+        <div class="item-title" style="color: #c4b5fd;" title="${escapeHtml(pk.rp_name || pk.rp_id)}">⚡ ${escapeHtml(pk.rp_name || pk.rp_id)}</div>
+        <span style="font-size: 10px; background: rgba(139, 92, 246, 0.25); color: #c4b5fd; padding: 2px 6px; border-radius: 999px; border: 1px solid rgba(139, 92, 246, 0.35); font-weight: 600;">FIDO2</span>
+      </div>
+      <div class="item-user" style="color: #cbd5e1;" title="${escapeHtml(pk.username || '')}">
+        Benutzer: <strong>${escapeHtml(pk.username || 'Unbekannt')}</strong>
+      </div>
+      <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 8px;">
+        ID: <span style="font-family: monospace; color: #a5b4fc;">${escapeHtml((pk.credential_id || '').substring(0, 16))}...</span>
+      </div>
+      <div class="actions">
+        <button class="btn btn-autofill btn-fill-pk" style="background: #7c3aed;">⚡ Ausfüllen</button>
+        <button class="btn btn-secondary btn-copy-pk-user" title="Benutzername kopieren">👤</button>
+        <button class="btn btn-secondary btn-copy-pk-id" title="Credential ID kopieren">🔑</button>
+      </div>
+    `;
+
+    card.querySelector(".btn-fill-pk").onclick = () => executeAutofill(pk.username, "", "", pk);
+    card.querySelector(".btn-copy-pk-user").onclick = () => copyText(pk.username, "Benutzername kopiert! ✓");
+    card.querySelector(".btn-copy-pk-id").onclick = () => copyText(pk.credential_id, "Credential ID kopiert! ✓");
 
     listEl.appendChild(card);
   }
@@ -497,6 +640,19 @@ async function loginAndSyncDirectly(username, password, totpCode) {
   });
   const rawItems = await itemsRes.json();
 
+  // Step 4b: Fetch Passkeys
+  let passkeys = [];
+  try {
+    const pkRes = await fetch(`${SERVER_URL}/api/passkeys`, {
+      headers: { "Authorization": `Bearer ${verifyData.token}` }
+    });
+    if (pkRes.ok) {
+      passkeys = await pkRes.json();
+    }
+  } catch (pkErr) {
+    console.debug("Could not fetch passkeys:", pkErr);
+  }
+
   // Step 5: Decrypt Logins
   const logins = [];
   for (const it of rawItems) {
@@ -520,9 +676,12 @@ async function loginAndSyncDirectly(username, password, totpCode) {
     }
   }
 
-  // Step 6: Save decrypted items strictly in-memory (session storage)
+  // Step 6: Save decrypted items and passkeys strictly in-memory (session storage)
   if (chrome.storage.session) {
-    await chrome.storage.session.set({ vault_cache: logins });
+    await chrome.storage.session.set({
+      vault_cache: logins,
+      vault_passkeys: passkeys
+    });
   }
   // Store only non-sensitive metadata in persistent local storage
   await chrome.storage.local.set({
@@ -530,20 +689,22 @@ async function loginAndSyncDirectly(username, password, totpCode) {
     last_synced: Date.now()
   });
   // Purge any legacy plain passwords from persistent storage
-  await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
+  await new Promise(r => chrome.storage.local.remove(["vault_cache", "vault_passkeys"], r));
 
   allVaultItems = logins;
+  allVaultPasskeys = passkeys;
   chrome.runtime.sendMessage({ action: "VAULT_UNLOCKED" }, () => {});
   await loadCachedVault();
-  showToast(`Erfolgreich! ${logins.length} Logins bereit.`);
+  showToast(`Erfolgreich! ${logins.length} Logins & ${passkeys.length} Passkeys bereit.`);
 }
 
 async function lockExtension() {
   if (chrome.storage.session) {
     await chrome.storage.session.clear();
   }
-  await new Promise(r => chrome.storage.local.remove(["vault_cache"], r));
+  await new Promise(r => chrome.storage.local.remove(["vault_cache", "vault_passkeys"], r));
   allVaultItems = [];
+  allVaultPasskeys = [];
   chrome.runtime.sendMessage({ action: "VAULT_LOCKED" }, () => {});
   await loadCachedVault();
   showToast("Erweiterung gesperrt 🔒");
@@ -553,7 +714,7 @@ async function lockExtension() {
 // 7. AUTOFILL TRIGGER
 // =============================================================
 
-async function executeAutofill(username, password) {
+async function executeAutofill(username, password, totp = "", passkey = null) {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tabs[0] || !tabs[0].id) {
@@ -568,8 +729,13 @@ async function executeAutofill(username, password) {
       return;
     }
 
+    // If totp is present, immediately copy it to clipboard so it's ready for step 2!
+    if (totp) {
+      handleTotpCopy(totp);
+    }
+
     // Try messaging content script
-    chrome.tabs.sendMessage(tabId, { action: "AUTOFILL", username, password }, async (res) => {
+    chrome.tabs.sendMessage(tabId, { action: "AUTOFILL", username, password, totp, passkey }, async (res) => {
       if (chrome.runtime.lastError || !res) {
         // Content script was not present -> inject dynamically
         try {
@@ -578,7 +744,7 @@ async function executeAutofill(username, password) {
             files: ["content.js"]
           });
           setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, { action: "AUTOFILL", username, password }, (retryRes) => {
+            chrome.tabs.sendMessage(tabId, { action: "AUTOFILL", username, password, totp, passkey }, (retryRes) => {
               processAutofillResult(retryRes);
             });
           }, 150);
@@ -922,24 +1088,34 @@ function generateNewPassword() {
 
 function setupTabs() {
   const btnLogins = document.getElementById("tab-btn-logins");
+  const btnPasskeys = document.getElementById("tab-btn-passkeys");
   const btnGen = document.getElementById("tab-btn-generator");
   const viewLogins = document.getElementById("view-logins");
+  const viewPasskeys = document.getElementById("view-passkeys");
   const viewGen = document.getElementById("view-generator");
 
   if (!btnLogins || !btnGen) return;
 
+  function switchTab(activeBtn, activeView) {
+    [btnLogins, btnPasskeys, btnGen].forEach(b => b?.classList.remove("active"));
+    [viewLogins, viewPasskeys, viewGen].forEach(v => { if (v) v.style.display = "none"; });
+    activeBtn?.classList.add("active");
+    if (activeView) activeView.style.display = "block";
+  }
+
   btnLogins.addEventListener("click", () => {
-    btnLogins.classList.add("active");
-    btnGen.classList.remove("active");
-    viewLogins.style.display = "block";
-    viewGen.style.display = "none";
+    switchTab(btnLogins, viewLogins);
   });
 
+  if (btnPasskeys) {
+    btnPasskeys.addEventListener("click", () => {
+      switchTab(btnPasskeys, viewPasskeys);
+      renderPasskeys();
+    });
+  }
+
   btnGen.addEventListener("click", () => {
-    btnGen.classList.add("active");
-    btnLogins.classList.remove("active");
-    viewLogins.style.display = "none";
-    viewGen.style.display = "block";
+    switchTab(btnGen, viewGen);
     generateNewPassword();
   });
 }

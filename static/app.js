@@ -1033,6 +1033,7 @@ function syncWithBrowserExtension() {
       source: "SENTINELBIT_WEB_APP",
       action: "SYNC_VAULT",
       items: cacheItems,
+      passkeys: passkeysList || [],
       user: currentUser ? currentUser.username : ""
     }, window.location.origin);
   } catch (e) {
@@ -1054,11 +1055,13 @@ window.addEventListener("message", (event) => {
       const badge = document.getElementById("badge-extension-status");
       if (badge) {
         badge.style.display = "inline-block";
-        badge.innerText = `Aktiv (${event.data.count})`;
+        const pkCount = event.data.passkeysCount ? ` + ${event.data.passkeysCount} ⚡` : '';
+        badge.innerText = `Aktiv (${event.data.count}${pkCount})`;
       }
       const statusText = document.getElementById("ext-modal-status-text");
       if (statusText) {
-        statusText.innerText = `Erweiterung synchronisiert: ${event.data.count} Logins bereit ✓`;
+        const pkText = event.data.passkeysCount ? ` & ${event.data.passkeysCount} Passkeys` : '';
+        statusText.innerText = `Erweiterung synchronisiert: ${event.data.count} Zugänge${pkText} bereit ✓`;
       }
     }
   }

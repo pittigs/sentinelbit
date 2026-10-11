@@ -92,16 +92,18 @@ async function autofillTab(tab) {
 
   const session = await getSessionData();
   const items = session.vault_cache || [];
+  const passkeys = session.vault_passkeys || [];
 
-  if (items.length === 0) {
+  if (items.length === 0 && passkeys.length === 0) {
     flashBadge(tab.id, "🔒", "#ef4444");
     return;
   }
 
   const hostname = extractDomain(tab.url);
   const match = findBestMatch(items, hostname);
+  const matchingPasskeys = passkeys.filter(pk => matchesDomain({ url: pk.rp_id, title: pk.rp_name }, hostname));
 
-  if (!match) {
+  if (!match && matchingPasskeys.length === 0) {
     flashBadge(tab.id, "0", "#6b7280");
     return;
   }
@@ -111,8 +113,10 @@ async function autofillTab(tab) {
       tab.id,
       {
         action: "AUTOFILL",
-        username: match.username,
-        password: match.password
+        username: match ? match.username : (matchingPasskeys[0]?.username || ""),
+        password: match ? match.password : "",
+        totp: match ? (match.totp || "") : "",
+        passkey: matchingPasskeys[0] || null
       },
       (response) => {
         if (chrome.runtime.lastError) {
@@ -216,18 +220,21 @@ async function updateBadgeForTab(tab) {
 
   const session = await getSessionData();
   const items = session.vault_cache || [];
+  const passkeys = session.vault_passkeys || [];
 
-  if (items.length === 0) {
+  if (items.length === 0 && passkeys.length === 0) {
     chrome.action.setBadgeText({ text: "", tabId: tab.id });
     return;
   }
 
   const hostname = extractDomain(tab.url);
-  const count = items.filter(it => matchesDomain(it, hostname)).length;
+  const countLogins = items.filter(it => matchesDomain(it, hostname)).length;
+  const countPasskeys = passkeys.filter(pk => matchesDomain({ url: pk.rp_id, title: pk.rp_name }, hostname)).length;
+  const total = countLogins + countPasskeys;
 
-  if (count > 0) {
-    chrome.action.setBadgeText({ text: String(count), tabId: tab.id });
-    chrome.action.setBadgeBackgroundColor({ color: "#3b82f6", tabId: tab.id });
+  if (total > 0) {
+    chrome.action.setBadgeText({ text: String(total), tabId: tab.id });
+    chrome.action.setBadgeBackgroundColor({ color: countPasskeys > 0 ? "#8b5cf6" : "#3b82f6", tabId: tab.id });
   } else {
     chrome.action.setBadgeText({ text: "", tabId: tab.id });
   }
@@ -258,7 +265,7 @@ async function getSessionData() {
     });
   }
   return new Promise((resolve) => {
-    chrome.storage.local.get(["vault_cache"], (res) => resolve(res || {}));
+    chrome.storage.local.get(["vault_cache", "vault_passkeys"], (res) => resolve(res || {}));
   });
 }
 
@@ -293,7 +300,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: "ok" });
   } else if (request.action === "SET_SESSION_VAULT") {
     if (chrome.storage.session) {
-      chrome.storage.session.set({ vault_cache: request.items || [] });
+      chrome.storage.session.set({
+        vault_cache: request.items || [],
+        vault_passkeys: request.passkeys || []
+      });
     }
     chrome.storage.local.set({ last_active_time: Date.now() });
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -313,9 +323,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "GET_MATCHING_LOGINS") {
     getSessionData().then(session => {
       const items = session.vault_cache || [];
+      const passkeys = session.vault_passkeys || [];
       const hostname = extractDomain(request.url || "");
       const matches = items.filter(it => matchesDomain(it, hostname));
-      sendResponse({ matches, totalItems: items.length });
+      const matchingPasskeys = passkeys.filter(pk => matchesDomain({ url: pk.rp_id, title: pk.rp_name }, hostname));
+      sendResponse({
+        matches,
+        passkeys: matchingPasskeys,
+        totalItems: items.length,
+        totalPasskeys: passkeys.length
+      });
     });
     return true;
   }

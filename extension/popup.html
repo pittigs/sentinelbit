@@ -174,6 +174,7 @@
     <!-- Navigation Tabs -->
     <div class="tabs">
       <button class="tab-btn active" id="tab-btn-logins">🔑 Zugänge</button>
+      <button class="tab-btn" id="tab-btn-passkeys">⚡ Passkeys</button>
       <button class="tab-btn" id="tab-btn-generator">🎲 Generator</button>
     </div>
 
@@ -194,7 +195,24 @@
       </div>
     </div>
 
-    <!-- View 2: Password Generator -->
+    <!-- View 2: Passkeys (FIDO2) -->
+    <div id="view-passkeys" style="display: none;">
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="passkey-search" class="search-input has-icon" placeholder="Passkeys durchsuchen...">
+      </div>
+
+      <div class="domain-bar">
+        <span id="passkey-domain-label">Gefundene Passkeys:</span>
+        <a href="#" class="domain-toggle-link" id="btn-toggle-all-passkeys">Alle anzeigen</a>
+      </div>
+
+      <div class="items-container" id="passkeys-list">
+        <!-- Populated dynamically via popup.js -->
+      </div>
+    </div>
+
+    <!-- View 3: Password Generator -->
     <div id="view-generator" style="display: none;">
       <div class="generator-card">
         <div class="pwd-display" id="gen-pwd-output">••••••••••••••••</div>
