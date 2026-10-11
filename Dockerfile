@@ -25,8 +25,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o
 # -------------------------------------------------------------
 FROM alpine:3.20
 
-# TLS-Zertifikate für sichere externe Anfragen & Zeitzonen
-RUN apk --no-cache add ca-certificates tzdata && \
+# TLS-Zertifikate für sichere externe Anfragen, Zeitzonen & su-exec zum Droppen von Rechten
+RUN apk --no-cache add ca-certificates tzdata su-exec && \
     addgroup -g 10001 -S sentinelbit && \
     adduser -u 10001 -S sentinelbit -G sentinelbit
 
@@ -36,6 +36,8 @@ WORKDIR /app
 COPY --from=builder /app/sentinelbit /app/sentinelbit
 COPY --from=builder /app/sentinelbit-cli /usr/local/bin/sentinelbit-cli
 COPY --from=builder /app/static /app/static
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Datenverzeichnis für SQLite & Backups mit Rechten für unprivilegierten Nutzer
 RUN mkdir -p /data && chown -R sentinelbit:sentinelbit /data /app
@@ -49,11 +51,11 @@ ENV SENTINELBIT_LOG_LEVEL=info
 
 EXPOSE 8000
 
-USER sentinelbit:sentinelbit
-
 # Docker Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/api/health || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Startbefehl
 CMD ["/app/sentinelbit"]

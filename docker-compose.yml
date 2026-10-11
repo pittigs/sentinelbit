@@ -2,10 +2,10 @@ version: '3.8'
 
 services:
   sentinelbit:
-    image: ghcr.io/pittigs/sentinelbit:latest
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sentinelbit:latest
     container_name: sentinelbit
     restart: unless-stopped
     ports:
@@ -13,9 +13,11 @@ services:
     environment:
       - SENTINELBIT_DATA_DIR=/data
       - SENTINELBIT_PORT=8000
+      # Nach der Erstregistrierung auf 'true' setzen:
+      - SENTINELBIT_DISABLE_REGISTRATION=false
+      - SENTINELBIT_LOG_LEVEL=info
     volumes:
       # Persistente SQLite-Datenbank und automatische Backups
       - ./data:/data
-      # Optional: Lokales externes Backup-Ziel einbinden
-      - ./backups:/data/backups
+
 
