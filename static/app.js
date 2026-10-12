@@ -1338,6 +1338,41 @@ function switchTab(tab) {
   renderVaultItems();
 }
 
+// =============================================================
+// VECTOR SVG ICONS (Clean, modern UI icons for vault cards & actions)
+// =============================================================
+const SVG_ICONS = {
+  login: `<svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-2-2l2 2m0 0l-7.5 7.5a5 5 0 1 0 2.8 2.8L21 4v2h2V2h-2z"/></svg>`,
+  note: `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+  card: `<svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`,
+  passkey: `<svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
+  totp: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
+  copy: `<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+  eye: `<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  eyeOff: `<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
+  edit: `<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+  starFilled: `<svg viewBox="0 0 24 24" style="fill: #fbbf24; stroke: #fbbf24;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  starOutline: `<svg viewBox="0 0 24 24" style="fill: none; stroke: currentColor;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+  attachment: `<svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
+  restore: `<svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`,
+  test: `<svg viewBox="0 0 24 24"><path d="M10 2v7.31L4.2 18.68A2 2 0 0 0 6 22h12a2 2 0 0 0 1.8-3.32L14 9.31V2"/></svg>`,
+  close: `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  history: `<svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+  dice: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="15.5" r="1.5"/><circle cx="8.5" cy="15.5" r="1.5"/></svg>`,
+  sun: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`,
+  moon: `<svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  zap: `<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  lock: `<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+  shield: `<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  terminal: `<svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+  archive: `<svg viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`,
+  sync: `<svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+  fingerprint: `<svg viewBox="0 0 24 24"><path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4"/><path d="M5 19.5C5.5 18 6 15 6 12c0-.7.1-1.4.3-2"/><path d="M12 10a2 2 0 0 0-2 2c0 2.5-1 4.5-2 6"/><path d="M14 13a2 2 0 0 1-2 2c-1.5 0-2.5 1-3 2"/><path d="M17 12c0-2.8-2.2-5-5-5s-5 2.2-5 5c0 1.8.5 3.5 1.4 4.8"/><path d="M19 15.5c-.3 1.5-1 3-2 4.5"/><path d="M22 12c0 4-2 7-4 9.5"/></svg>`
+};
+
 function renderSidebarFolders() {
   const container = document.getElementById("sidebar-folder-list");
   const datalist = document.getElementById("folder-suggestions");
@@ -1368,12 +1403,12 @@ function renderSidebarFolders() {
     const depth = parts.length - 1;
     const displayName = parts[parts.length - 1];
     const indentPx = depth * 14;
-    const icon = depth > 0 ? "↳ 📂" : "📁";
+    const arrow = depth > 0 ? `<span style="font-size: 0.75rem; color: var(--text-dim); margin-right: 3px;">↳</span>` : '';
 
     return `
       <div class="nav-item ${activeTab === 'folder:' + f ? 'active' : ''}" style="padding-left: ${12 + indentPx}px;" onclick="switchFolder('${escapeHtml(f)}')" title="Ordner: ${escapeHtml(f)}">
         <div class="nav-item-content">
-          <span class="nav-icon" style="font-size: 0.85rem;">${icon}</span>
+          <span class="nav-icon">${arrow}${SVG_ICONS.folder}</span>
           <span class="nav-text">${escapeHtml(displayName)}</span>
         </div>
         <span class="badge">${folderCounts[f]}</span>
@@ -1421,6 +1456,7 @@ function getFaviconUrl(urlStr) {
   return `/api/favicon?domain=${encodeURIComponent(domain)}`;
 }
 
+
 async function renderVaultItems() {
   const container = document.getElementById("items-container");
   const emptyState = document.getElementById("empty-state");
@@ -1435,7 +1471,7 @@ async function renderVaultItems() {
     if (trashItems.length === 0) {
       container.innerHTML = `
         <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-dim);">
-          <div style="font-size: 2.5rem; margin-bottom: 8px;">🗑️</div>
+          <div style="width: 48px; height: 48px; margin: 0 auto 12px auto; opacity: 0.6;">${SVG_ICONS.trash}</div>
           Der Papierkorb ist leer.
         </div>
       `;
@@ -1454,7 +1490,7 @@ async function renderVaultItems() {
     trashBar.style.borderRadius = "var(--radius-md)";
     trashBar.innerHTML = `
       <span style="font-size: 0.85rem; color: #f87171;">${trashItems.length} Element(e) im Papierkorb.</span>
-      <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="emptyAllTrash()">🗑️ Papierkorb leeren</button>
+      <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 4px;" onclick="emptyAllTrash()">${SVG_ICONS.trash} Papierkorb leeren</button>
     `;
     container.appendChild(trashBar);
 
@@ -1466,7 +1502,7 @@ async function renderVaultItems() {
       card.innerHTML = `
         <div class="card-header">
           <div style="display: flex; gap: 12px; align-items: center; overflow: hidden;">
-            <div class="card-icon">🗑️</div>
+            <div class="card-icon">${SVG_ICONS.trash}</div>
             <div class="card-title-group">
               <div class="card-title">${escapeHtml(item.title)}</div>
               <div class="card-subtitle">${escapeHtml(item.data.username || item.data.url || '')}</div>
@@ -1474,10 +1510,10 @@ async function renderVaultItems() {
           </div>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 10px;">
-          <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 0.8rem;" onclick="restoreVaultItem('${item.id}')">
-            ↩️ Wiederherstellen
+          <button class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" onclick="restoreVaultItem('${item.id}')">
+            ${SVG_ICONS.restore} Wiederherstellen
           </button>
-          <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="deleteVaultItem('${item.id}', true)">
+          <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center;" onclick="deleteVaultItem('${item.id}', true)">
             Endgültig löschen
           </button>
         </div>
@@ -1554,17 +1590,17 @@ async function renderVaultItems() {
     const card = document.createElement("div");
     card.className = "vault-card";
 
-    let icon = "🔑";
-    if (item.type === "note") icon = "📝";
-    if (item.type === "card") icon = "💳";
+    let iconSvg = SVG_ICONS.login;
+    if (item.type === "note") iconSvg = SVG_ICONS.note;
+    if (item.type === "card") iconSvg = SVG_ICONS.card;
 
-    let iconHtml = `<div class="card-icon">${icon}</div>`;
+    let iconHtml = `<div class="card-icon">${iconSvg}</div>`;
     if (item.type === "login" && item.data.url) {
       const fav = getFaviconUrl(item.data.url);
       if (fav) {
         iconHtml = `
           <div class="card-icon" style="background: transparent;">
-            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML='${icon}';">
+            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML=\`${iconSvg.replace(/`/g, '\\`')}\`;">
           </div>
         `;
       }
@@ -1596,7 +1632,7 @@ async function renderVaultItems() {
           ${item.data.username ? `
             <span class="card-field-label">Benutzer:</span>
             <span class="card-field-val">${escapeHtml(item.data.username)}</span>
-            <button class="btn-icon" onclick="copyItemUsername('${item.id}')" title="Kopieren">📋</button>
+            <button class="btn-icon" onclick="copyItemUsername('${item.id}')" title="Kopieren">${SVG_ICONS.copy}</button>
           ` : `
             <span class="card-field-empty">—</span>
           `}
@@ -1606,8 +1642,8 @@ async function renderVaultItems() {
           ${item.data.password ? `
             <span class="card-field-label">Passwort:</span>
             <span class="card-field-val" id="pwd-${item.id}">••••••••••••</span>
-            <button class="btn-icon" onclick="toggleCardPassword('${item.id}')" title="Anzeigen">👁️</button>
-            <button class="btn-icon" onclick="copyItemPassword('${item.id}')" title="Kopieren">📋</button>
+            <button class="btn-icon" onclick="toggleCardPassword('${item.id}', this)" title="Passwort anzeigen/verbergen">${SVG_ICONS.eye}</button>
+            <button class="btn-icon" onclick="copyItemPassword('${item.id}')" title="Kopieren">${SVG_ICONS.copy}</button>
           ` : `
             <span class="card-field-empty">—</span>
           `}
@@ -1615,24 +1651,28 @@ async function renderVaultItems() {
 
         ${item.data.totp ? `
           <div class="totp-badge-compact" id="totp-card-${item.id}" onclick="copyTotpCode('${item.id}')" title="2FA Code kopieren">
-            <span style="font-size: 0.68rem; color: #34d399; font-weight: 700;">2FA</span>
+            <span style="font-size: 0.68rem; color: #34d399; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;">
+              <span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.totp}</span> 2FA
+            </span>
             <span class="totp-code-compact" id="totp-val-${item.id}">------</span>
             <span class="totp-timer-compact" id="totp-sec-${item.id}">30s</span>
-            <button class="btn-icon" style="padding: 2px;" onclick="event.stopPropagation(); copyTotpCode('${item.id}')" title="Code kopieren">📋</button>
+            <button class="btn-icon" style="padding: 2px;" onclick="event.stopPropagation(); copyTotpCode('${item.id}')" title="Code kopieren">${SVG_ICONS.copy}</button>
           </div>
         ` : ''}
 
         ${matchingPk ? `
           <div class="passkey-pill-compact" style="display: flex; align-items: center; justify-content: space-between; background: rgba(139, 92, 246, 0.12); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: var(--radius-sm); padding: 3px 8px; font-size: 0.72rem; gap: 6px;">
-            <span style="color: #c4b5fd; font-weight: 600;">⚡ Passkey</span>
+            <span style="color: #c4b5fd; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+              <span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.passkey}</span> Passkey
+            </span>
             <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="event.stopPropagation(); testPasskeyAssertion('${matchingPk.id}')" title="WebAuthn Simulation">Testen</button>
           </div>
         ` : ''}
 
         ${item.data.attachment ? `
           <div class="attachment-pill">
-            <span class="attachment-badge" onclick="downloadAttachment('${item.id}')" title="Klicken zum Herunterladen">
-              📎 ${escapeHtml(item.data.attachment.name)}
+            <span class="attachment-badge" onclick="downloadAttachment('${item.id}')" title="Klicken zum Herunterladen" style="display: inline-flex; align-items: center; gap: 4px;">
+              <span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.attachment}</span> ${escapeHtml(item.data.attachment.name)}
             </span>
           </div>
         ` : ''}
@@ -1644,8 +1684,8 @@ async function renderVaultItems() {
         </div>
         ${item.data.attachment ? `
           <div class="attachment-pill">
-            <span class="attachment-badge" onclick="downloadAttachment('${item.id}')">
-              📎 ${escapeHtml(item.data.attachment.name)}
+            <span class="attachment-badge" onclick="downloadAttachment('${item.id}')" style="display: inline-flex; align-items: center; gap: 4px;">
+              <span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.attachment}</span> ${escapeHtml(item.data.attachment.name)}
             </span>
           </div>
         ` : ''}
@@ -1669,8 +1709,8 @@ async function renderVaultItems() {
         <div class="card-title-group">
           <div class="card-title" title="${escapeHtml(item.title)}">
             ${escapeHtml(item.title)}
-            ${item.folder ? `<span class="badge" style="font-size: 0.68rem; margin-left: 6px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500;">📁 ${escapeHtml(item.folder)}</span>` : ''}
-            ${matchingPk ? `<span class="badge badge-passkey" style="font-size: 0.68rem; margin-left: 6px; padding: 2px 6px;" title="Passkey (FIDO2) hinterlegt">⚡ FIDO2</span>` : ''}
+            ${item.folder ? `<span class="badge" style="font-size: 0.68rem; margin-left: 6px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500; display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.folder}</span> ${escapeHtml(item.folder)}</span>` : ''}
+            ${matchingPk ? `<span class="badge badge-passkey" style="font-size: 0.68rem; margin-left: 6px; padding: 2px 6px; display: inline-flex; align-items: center; gap: 3px;" title="Passkey (FIDO2) hinterlegt"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>` : ''}
           </div>
           <div class="card-subtitle" title="${escapeHtml(item.data.url || item.folder || '')}">${escapeHtml(item.data.url || item.folder || 'Keine URL')}</div>
         </div>
@@ -1682,10 +1722,10 @@ async function renderVaultItems() {
 
       <div class="card-actions-col">
         <button class="btn-icon" onclick="toggleFavorite('${item.id}')" title="Favorit">
-          ${item.favorite ? '⭐' : '☆'}
+          ${item.favorite ? SVG_ICONS.starFilled : SVG_ICONS.starOutline}
         </button>
-        <button class="btn-icon" onclick="openEditItemModal('${item.id}')" title="Bearbeiten">✏️</button>
-        <button class="btn-icon" onclick="deleteVaultItem('${item.id}', false)" title="In Papierkorb">🗑️</button>
+        <button class="btn-icon" onclick="openEditItemModal('${item.id}')" title="Bearbeiten">${SVG_ICONS.edit}</button>
+        <button class="btn-icon" onclick="deleteVaultItem('${item.id}', false)" title="In Papierkorb">${SVG_ICONS.trash}</button>
       </div>
     `;
 
@@ -1702,13 +1742,13 @@ function renderPasskeyCards(passkeys) {
     card.className = "vault-card";
     card.style.border = "1px solid rgba(139, 92, 246, 0.35)";
 
-    let pkIconHtml = `<div class="card-icon passkey">⚡</div>`;
+    let pkIconHtml = `<div class="card-icon passkey">${SVG_ICONS.passkey}</div>`;
     if (pk.rp_id) {
       const fav = getFaviconUrl(pk.rp_id);
       if (fav) {
         pkIconHtml = `
           <div class="card-icon passkey" style="background: transparent;">
-            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML='⚡';">
+            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML=\`${SVG_ICONS.passkey.replace(/`/g, '\\`')}\`;">
           </div>
         `;
       }
@@ -1723,7 +1763,7 @@ function renderPasskeyCards(passkeys) {
             <div class="card-subtitle">${escapeHtml(pk.rp_id)}</div>
           </div>
         </div>
-        <span class="badge badge-passkey">FIDO2</span>
+        <span class="badge badge-passkey" style="display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>
       </div>
 
       <div class="card-row">
@@ -1737,11 +1777,11 @@ function renderPasskeyCards(passkeys) {
       </div>
 
       <div style="display: flex; gap: 8px; margin-top: 4px;">
-        <button class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 0.8rem;" onclick="testPasskeyAssertion('${pk.id}')">
-          🧪 WebAuthn Testen
+        <button class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" onclick="testPasskeyAssertion('${pk.id}')">
+          ${SVG_ICONS.test} WebAuthn Testen
         </button>
-        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="deletePasskey('${pk.id}')" title="Passkey löschen">
-          🗑️
+        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center;" onclick="deletePasskey('${pk.id}')" title="Passkey löschen">
+          ${SVG_ICONS.trash}
         </button>
       </div>
     `;
@@ -1842,7 +1882,7 @@ function openAddItemModal() {
   currentItemPasswordHistory = [];
   document.getElementById("item-attachment-file").value = "";
   document.getElementById("attachment-preview").style.display = "none";
-  document.getElementById("btn-toggle-history").innerText = "📜 Passwort-Historie (0)";
+  document.getElementById("btn-toggle-history").innerHTML = `${SVG_ICONS.history} Passwort-Historie (0)`;
   document.getElementById("password-history-list").style.display = "none";
 
   evaluateItemPasswordStrength("");
@@ -1881,7 +1921,7 @@ function openEditItemModal(id) {
 
   // Password history
   currentItemPasswordHistory = item.data.passwordHistory || [];
-  document.getElementById("btn-toggle-history").innerText = `📜 Passwort-Historie (${currentItemPasswordHistory.length})`;
+  document.getElementById("btn-toggle-history").innerHTML = `${SVG_ICONS.history} Passwort-Historie (${currentItemPasswordHistory.length})`;
   document.getElementById("password-history-list").style.display = "none";
 
   // Attachment
@@ -1890,9 +1930,9 @@ function openEditItemModal(id) {
   if (currentItemAttachment) {
     attachPrev.style.display = "block";
     attachPrev.innerHTML = `
-      <div class="attachment-badge">
-        📎 ${escapeHtml(currentItemAttachment.name)} (${formatFileSize(currentItemAttachment.size)})
-        <a href="#" onclick="removeCurrentAttachment(event)" style="color: #f87171; text-decoration: none; margin-left: 6px;">✕ Entfernen</a>
+      <div class="attachment-badge" style="display: inline-flex; align-items: center; gap: 4px;">
+        <span style="width: 13px; height: 13px; display: inline-flex;">${SVG_ICONS.attachment}</span> ${escapeHtml(currentItemAttachment.name)} (${formatFileSize(currentItemAttachment.size)})
+        <a href="#" onclick="removeCurrentAttachment(event)" style="color: #f87171; text-decoration: none; margin-left: 6px; display: inline-flex; align-items: center; gap: 2px;"><span style="width: 10px; height: 10px; display: inline-flex;">${SVG_ICONS.close}</span> Entfernen</a>
       </div>
     `;
   } else {
@@ -1922,7 +1962,7 @@ function togglePasswordHistoryView(e) {
             <span style="font-family: monospace;">${escapeHtml(h.password)}</span>
             <div style="font-size: 0.7rem; color: var(--text-dim);">${new Date(h.changedAt).toLocaleString()}</div>
           </div>
-          <button type="button" class="btn-icon" onclick="copyHistoryPassword(${idx})" title="Kopieren">📋</button>
+          <button type="button" class="btn-icon" onclick="copyHistoryPassword(${idx})" title="Kopieren">${SVG_ICONS.copy}</button>
         </div>
       `).join('');
     }
@@ -1959,9 +1999,9 @@ function handleAttachmentSelected(event) {
     const attachPrev = document.getElementById("attachment-preview");
     attachPrev.style.display = "block";
     attachPrev.innerHTML = `
-      <div class="attachment-badge">
-        📎 ${escapeHtml(file.name)} (${formatFileSize(file.size)})
-        <a href="#" onclick="removeCurrentAttachment(event)" style="color: #f87171; text-decoration: none; margin-left: 6px;">✕ Entfernen</a>
+      <div class="attachment-badge" style="display: inline-flex; align-items: center; gap: 4px;">
+        <span style="width: 13px; height: 13px; display: inline-flex;">${SVG_ICONS.attachment}</span> ${escapeHtml(file.name)} (${formatFileSize(file.size)})
+        <a href="#" onclick="removeCurrentAttachment(event)" style="color: #f87171; text-decoration: none; margin-left: 6px; display: inline-flex; align-items: center; gap: 2px;"><span style="width: 10px; height: 10px; display: inline-flex;">${SVG_ICONS.close}</span> Entfernen</a>
       </div>
     `;
     showToast("Datei bereit zur Verschlüsselung!", "info");
@@ -2140,15 +2180,17 @@ async function toggleFavorite(id) {
   }
 }
 
-function toggleCardPassword(id) {
+function toggleCardPassword(id, btnEl) {
   const el = document.getElementById(`pwd-${id}`);
   if (!el) return;
   const item = decryptedItems.find(i => i.id === id);
   if (!item || !item.data || !item.data.password) return;
   if (el.innerText === "••••••••••••") {
     el.innerText = item.data.password;
+    if (btnEl) btnEl.innerHTML = SVG_ICONS.eyeOff;
   } else {
     el.innerText = "••••••••••••";
+    if (btnEl) btnEl.innerHTML = SVG_ICONS.eye;
   }
 }
 
@@ -2843,7 +2885,7 @@ function renderAuditIssueList() {
   if (entries.length === 0) {
     listContainer.innerHTML = `
       <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 24px; text-align: center; color: var(--color-success);">
-        <div style="font-size: 2rem; margin-bottom: 8px;">🎉</div>
+        <div style="width: 36px; height: 36px; margin: 0 auto 10px auto; color: #34d399;">${SVG_ICONS.shield}</div>
         <div style="font-weight: 700; font-size: 0.95rem;">Keine Probleme in dieser Kategorie gefunden!</div>
         <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">Deine Passwörter entsprechen in diesem Bereich den Best-Practice-Sicherheitsstandards.</div>
       </div>
@@ -2868,16 +2910,16 @@ function renderAuditIssueList() {
             `).join("")}
           </div>
           <div style="font-size: 0.78rem; color: var(--text-dim); margin-top: 3px; display: flex; gap: 10px; align-items: center;">
-            <span>👤 ${username}</span>
-            ${url ? `<span>🌐 ${url}</span>` : ""}
+            <span style="display: inline-flex; align-items: center; gap: 4px;"><span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.login}</span> ${username}</span>
+            ${url ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.folder}</span> ${url}</span>` : ""}
           </div>
           <div style="margin-top: 4px; font-size: 0.76rem; color: var(--text-muted);">
             ${e.issues.map(iss => `<div>• ${escapeHtml(iss.detail)}</div>`).join("")}
           </div>
         </div>
 
-        <button type="button" class="btn btn-secondary btn-sm" onclick="editAuditItem('${it.id}')" style="white-space: nowrap; font-size: 0.78rem; padding: 6px 12px;">
-          🔧 Bearbeiten
+        <button type="button" class="btn btn-secondary btn-sm" onclick="editAuditItem('${it.id}')" style="white-space: nowrap; font-size: 0.78rem; padding: 6px 12px; display: inline-flex; align-items: center; gap: 4px;">
+          ${SVG_ICONS.edit} Bearbeiten
         </button>
       </div>
     `;
@@ -3723,8 +3765,8 @@ async function loadAliases() {
           <div style="font-family: monospace; font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(a.alias_email)}</div>
         </div>
         <div style="display: flex; gap: 4px;">
-          <button class="btn-icon" onclick="copyAliasByIndex(${idx})" title="Kopieren">📋</button>
-          <button class="btn-icon" onclick="deleteAlias('${a.id}')" title="Löschen" style="color: #f87171;">🗑️</button>
+          <button class="btn-icon" onclick="copyAliasByIndex(${idx})" title="Kopieren">${SVG_ICONS.copy}</button>
+          <button class="btn-icon" onclick="deleteAlias('${a.id}')" title="Löschen" style="color: #f87171;">${SVG_ICONS.trash}</button>
         </div>
       `;
       container.appendChild(card);
@@ -3800,8 +3842,8 @@ function populateShareSelect() {
   sel.innerHTML = "";
   decryptedItems.forEach(it => {
     const opt = document.createElement("option");
-    opt.value = it.id;
-    opt.innerText = `${it.type === 'login' ? '🔑' : '📝'} ${it.title} (${it.data.username || it.data.url || 'Kein Benutzer'})`;
+    const typeLabel = it.type === 'login' ? 'Login' : (it.type === 'note' ? 'Notiz' : 'Karte');
+    opt.innerText = `[${typeLabel}] ${it.title} (${it.data.username || it.data.url || 'Kein Benutzer'})`;
     sel.appendChild(opt);
   });
 }
@@ -3842,8 +3884,8 @@ async function loadSharedInbox() {
           <div style="font-size: 0.75rem; color: var(--text-dim);">Von: ${escapeHtml(it.sender_username)} am ${new Date(it.created_at).toLocaleDateString()}</div>
         </div>
         <div style="display: flex; gap: 6px;">
-          <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="importSharedInboxByIndex(${idx})">
-            📥 Importieren
+          <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 4px;" onclick="importSharedInboxByIndex(${idx})">
+            ${SVG_ICONS.archive} Importieren
           </button>
           <button class="btn-icon" onclick="deleteSharedInboxItem('${it.id}')" title="Ablehnen" style="color: #f87171;">✕</button>
         </div>
@@ -4052,66 +4094,6 @@ async function deleteSharedInboxItem(id) {
   }
 }
 
-// =============================================================
-// EMERGENCY KIT (NOTFALL-BLATT)
-// =============================================================
-
-async function openEmergencyKitModal() {
-  try {
-    const res = await fetch("/api/auth/emergency-kit", {
-      headers: { "Authorization": `Bearer ${sessionToken}` }
-    });
-    const data = await res.json();
-
-    document.getElementById("kit-username").innerText = data.username;
-    document.getElementById("kit-salt").innerText = data.enc_salt;
-    document.getElementById("kit-created-date").innerText = new Date().toLocaleDateString();
-
-    const recBox = document.getElementById("kit-recovery-codes-box");
-    const recList = document.getElementById("kit-recovery-list");
-    recList.innerHTML = "";
-
-    if (data.recovery_codes && data.recovery_codes.length > 0) {
-      recBox.style.display = "block";
-      data.recovery_codes.forEach(c => {
-        const el = document.createElement("div");
-        el.innerText = `• ${c}`;
-        recList.appendChild(el);
-      });
-    } else {
-      recBox.style.display = "none";
-    }
-
-    openModal("modal-emergency-kit");
-  } catch (err) {
-    showToast("Fehler beim Laden des Notfall-Kits: " + err.message, "error");
-  }
-}
-
-function printEmergencyKit() {
-  const content = document.getElementById("emergency-kit-sheet").innerHTML;
-  const printWindow = window.open("", "_blank");
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>sentinelbit - Notfall-Kit</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 40px; color: #0f172a; }
-          code { font-family: monospace; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; }
-        </style>
-      </head>
-      <body>
-        ${content}
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.close();
-  }, 250);
-}
 
 // =============================================================
 // THEME & VIEW MODE TOGGLE + SYSTEM INITIALIZATION
@@ -4123,7 +4105,7 @@ function toggleTheme() {
   document.documentElement.setAttribute("data-theme", next);
   localStorage.setItem("SENTINELBIT_theme", next);
   const btn = document.getElementById("theme-toggle-btn");
-  if (btn) btn.innerText = next === "light" ? "☀️" : "🌙";
+  if (btn) btn.innerHTML = next === "light" ? SVG_ICONS.sun : SVG_ICONS.moon;
 }
 
 function setViewMode(mode) {
@@ -4160,7 +4142,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const savedTheme = localStorage.getItem("SENTINELBIT_theme") || "dark";
   document.documentElement.setAttribute("data-theme", savedTheme);
   const themeBtn = document.getElementById("theme-toggle-btn");
-  if (themeBtn) themeBtn.innerText = savedTheme === "light" ? "☀️" : "🌙";
+  if (themeBtn) themeBtn.innerHTML = savedTheme === "light" ? SVG_ICONS.sun : SVG_ICONS.moon;
 
   // 2. View Mode initialization (grid or list)
   const savedViewMode = localStorage.getItem("SENTINELBIT_view_mode") || "grid";
@@ -4343,7 +4325,7 @@ function runDuplicateScan() {
     if (summaryEl) {
       summaryEl.innerHTML = `
         <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 16px; text-align: center;">
-          <div style="font-size: 2rem; margin-bottom: 6px;">🎉</div>
+          <div style="width: 36px; height: 36px; margin: 0 auto 8px auto; color: #34d399;">${SVG_ICONS.shield}</div>
           <h4 style="color: #34d399; margin-bottom: 4px;">Keine Duplikate gefunden!</h4>
           <p style="font-size: 0.85rem; color: var(--text-dim);">Dein Tresor ist optimal bereinigt und enthält keine doppelten Einträge.</p>
         </div>
@@ -4352,7 +4334,7 @@ function runDuplicateScan() {
     if (listEl) listEl.innerHTML = "";
     if (execBtn) {
       execBtn.disabled = true;
-      execBtn.innerText = "🧹 Keine Duplikate vorhanden";
+      execBtn.innerText = "Keine Duplikate vorhanden";
     }
     return;
   }
@@ -4361,8 +4343,8 @@ function runDuplicateScan() {
     summaryEl.innerHTML = `
       <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
         <div>
-          <div style="font-weight: 600; color: #fbbf24; font-size: 0.95rem;">
-            ⚠️ ${totalDupCopies} Duplikat(e) in ${groups.length} Gruppe(n) gefunden
+          <div style="font-weight: 600; color: #fbbf24; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+            <span style="width: 15px; height: 15px; display: inline-flex;">${SVG_ICONS.shield}</span> ${totalDupCopies} Duplikat(e) in ${groups.length} Gruppe(n) gefunden
           </div>
           <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 2px;">
             Das jeweils beste/älteste Element wird behalten. Überflüssige Kopien sind unten vorausgewählt.
@@ -4404,7 +4386,7 @@ function runDuplicateScan() {
             <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
               <input type="checkbox" class="cleanup-dup-checkbox" value="${d.id}" checked style="cursor: pointer;">
               <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                <span style="color: #f87171; font-weight: 500;">🗑️ Duplikat:</span>
+                <span style="color: #f87171; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;"><span style="width: 12px; height: 12px; display: inline-flex;">${SVG_ICONS.trash}</span> Duplikat:</span>
                 <span style="color: var(--text-main); font-weight: 500;">${escapeHtml(d.title)}</span>
                 <span style="color: var(--text-dim); font-size: 0.75rem;">(Erstellt: ${dDate})</span>
               </div>
@@ -4416,9 +4398,9 @@ function runDuplicateScan() {
 
       const keeperDate = group.keeper.created_at ? new Date(group.keeper.created_at).toLocaleString() : "Unbekannt";
       let keeperBadges = [];
-      if (group.keeper.favorite) keeperBadges.push("⭐ Favorit");
-      if (group.keeper.data?.totp) keeperBadges.push("⏱️ TOTP");
-      if (group.keeper.data?.notes) keeperBadges.push("📝 Notizen");
+      if (group.keeper.favorite) keeperBadges.push("Favorit");
+      if (group.keeper.data?.totp) keeperBadges.push("2FA");
+      if (group.keeper.data?.notes) keeperBadges.push("Notizen");
 
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
@@ -4431,7 +4413,7 @@ function runDuplicateScan() {
 
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px;">
           <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-            <span style="color: #34d399; font-weight: 600;">🟢 Behalten:</span>
+            <span style="color: #34d399; font-weight: 600;">Behalten:</span>
             <span style="color: var(--text-main); font-weight: 500;">${escapeHtml(group.keeper.title)}</span>
             <span style="color: var(--text-dim); font-size: 0.75rem;">(Erstellt: ${keeperDate})</span>
             ${keeperBadges.length ? `<span style="font-size: 0.72rem; color: #34d399; margin-left: 4px;">[${keeperBadges.join(", ")}]</span>` : ''}
@@ -4447,7 +4429,7 @@ function runDuplicateScan() {
 
   if (execBtn) {
     execBtn.disabled = totalDupCopies === 0;
-    execBtn.innerText = `🧹 ${totalDupCopies} Duplikat(e) entfernen`;
+    execBtn.innerHTML = `${SVG_ICONS.trash} ${totalDupCopies} Duplikat(e) entfernen`;
   }
 }
 
@@ -4541,7 +4523,7 @@ async function executeWipeVault() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerText = "🗑️ Gesamten Tresor jetzt unwiderruflich leeren";
+      btn.innerHTML = `${SVG_ICONS.trash} Gesamten Tresor jetzt unwiderruflich leeren`;
     }
   }
 }
@@ -4610,16 +4592,16 @@ function renderCommandPaletteResults(query) {
 
   // Standard commands
   const defaultCommands = [
-    { type: "action", icon: "➕", title: "Neuer Tresor-Eintrag", desc: "Passwort, Notiz oder Karte anlegen", run: () => openAddItemModal() },
-    { type: "action", icon: "🚀", title: "Secure Send (Burn-after-Reading)", desc: "Einmal-Link mit Zero-Knowledge Verschlüsselung erstellen", run: () => openSecureSendModal() },
-    { type: "action", icon: "🎲", title: "Passwort- & Diceware-Generator", desc: "Sicheres Passwort oder Einmal-Passphrase generieren", run: () => openGeneratorModal() },
-    { type: "action", icon: "🛡️", title: "Tresor-Sicherheits-Audit & Leaks", desc: "Passwort-Stärke, Leaks & 2FA-Status analysieren", run: () => openAuditModal() },
-    { type: "action", icon: "🧹", title: "Tresor bereinigen & Duplikate", desc: "Doppelte Einträge finden und aufräumen", run: () => openCleanupModal() },
-    { type: "action", icon: "💾", title: "Backup & Export / Import", desc: "Tresor verschlüsselt sichern oder importieren", run: () => openBackupModal() },
-    { type: "action", icon: "🔄", title: "Automatischer Sync & Sicherungsplan", desc: "Zielverzeichnis und Intervall konfigurieren", run: () => openSyncSettingsModal() },
-    { type: "action", icon: "🖐️", title: "Windows Hello / Biometrie", desc: "FIDO2 Fingerabdruck oder PIN verwalten", run: () => openBiometricModal() },
-    { type: "action", icon: "🌙", title: "Design umschalten (Dark / Light)", desc: "Farbschema wechseln", run: () => toggleTheme() },
-    { type: "action", icon: "🔒", title: "Tresor jetzt sperren", desc: "Sofort abmelden und Master-Key aus Speicher löschen", run: () => lockVault() },
+    { type: "action", icon: SVG_ICONS.plus, title: "Neuer Tresor-Eintrag", desc: "Passwort, Notiz oder Karte anlegen", run: () => openAddItemModal() },
+    { type: "action", icon: SVG_ICONS.zap, title: "Secure Send (Burn-after-Reading)", desc: "Einmal-Link mit Zero-Knowledge Verschlüsselung erstellen", run: () => openSecureSendModal() },
+    { type: "action", icon: SVG_ICONS.dice, title: "Passwort- & Diceware-Generator", desc: "Sicheres Passwort oder Einmal-Passphrase generieren", run: () => openGeneratorModal() },
+    { type: "action", icon: SVG_ICONS.shield, title: "Tresor-Sicherheits-Audit & Leaks", desc: "Passwort-Stärke, Leaks & 2FA-Status analysieren", run: () => openAuditModal() },
+    { type: "action", icon: SVG_ICONS.trash, title: "Tresor bereinigen & Duplikate", desc: "Doppelte Einträge finden und aufräumen", run: () => openCleanupModal() },
+    { type: "action", icon: SVG_ICONS.archive, title: "Backup & Export / Import", desc: "Tresor verschlüsselt sichern oder importieren", run: () => openBackupModal() },
+    { type: "action", icon: SVG_ICONS.sync, title: "Automatischer Sync & Sicherungsplan", desc: "Zielverzeichnis und Intervall konfigurieren", run: () => openSyncSettingsModal() },
+    { type: "action", icon: SVG_ICONS.fingerprint, title: "Windows Hello / Biometrie", desc: "FIDO2 Fingerabdruck oder PIN verwalten", run: () => openBiometricModal() },
+    { type: "action", icon: SVG_ICONS.moon, title: "Design umschalten (Dark / Light)", desc: "Farbschema wechseln", run: () => toggleTheme() },
+    { type: "action", icon: SVG_ICONS.lock, title: "Tresor jetzt sperren", desc: "Sofort abmelden und Master-Key aus Speicher löschen", run: () => lockVault() },
   ];
 
   const matchedActions = defaultCommands.filter(c =>
@@ -4635,10 +4617,10 @@ function renderCommandPaletteResults(query) {
     const tags = Array.isArray(it.tags) ? it.tags.join(" ").toLowerCase() : "";
     return title.includes(q) || username.includes(q) || url.includes(q) || tags.includes(q);
   }).map(it => {
-    let icon = "🔑";
-    if (it.type === "note") icon = "📝";
-    if (it.type === "card") icon = "💳";
-    if (it.type === "passkey") icon = "🛡️";
+    let icon = SVG_ICONS.login;
+    if (it.type === "note") icon = SVG_ICONS.note;
+    if (it.type === "card") icon = SVG_ICONS.card;
+    if (it.type === "passkey") icon = SVG_ICONS.passkey;
     const sub = it.data?.username ? `${it.data.username} ${it.data.url ? '• ' + it.data.url : ''}` : (it.data?.url || (it.type === "note" ? "Sichere Notiz" : "Zahlungskarte"));
     return {
       type: "item",
@@ -4744,7 +4726,7 @@ function resetSecureSendModal() {
   const btn = document.getElementById("btn-create-send");
   if (btn) {
     btn.disabled = false;
-    btn.innerText = "🚀 Verschlüsselten Einmal-Link erstellen";
+    btn.innerHTML = `<svg viewBox="0 0 24 24" style="width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Verschlüsselten Einmal-Link erstellen`;
   }
 }
 
@@ -4818,7 +4800,7 @@ async function createSecureSendLink() {
     showToast("Fehler bei Secure Send: " + err.message, "error");
     if (btn) {
       btn.disabled = false;
-      btn.innerText = "🚀 Verschlüsselten Einmal-Link erstellen";
+      btn.innerHTML = `<svg viewBox="0 0 24 24" style="width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Verschlüsselten Einmal-Link erstellen`;
     }
   }
 }
@@ -5147,7 +5129,7 @@ async function submitChangeMasterPassword() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerText = "🔑 Passwort jetzt ändern";
+      btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-1.5 1.5L16 7l-1.5-1.5L13 7l-1.5-1.5L9 8a6 6 0 1 0 5 9.8L22 10V6l-4-4z"/></svg> Passwort jetzt ändern`;
     }
   }
 }
