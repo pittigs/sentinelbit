@@ -321,6 +321,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+// Active 2FA session tracking for multi-step logins & redirects
+const active2FaSessions = new Map();
+let latest2FaSession = null;
+
+// Clean expired 2FA sessions periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [tabId, sess] of active2FaSessions.entries()) {
+    if (now - sess.timestamp > 120000) active2FaSessions.delete(tabId);
+  }
+  if (latest2FaSession && now - latest2FaSession.timestamp > 120000) {
+    latest2FaSession = null;
+  }
+}, 30000);
+
 // Listen for broadcast messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "VAULT_UNLOCKED") {
@@ -362,6 +377,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const sec = parseInt(request.seconds, 10) || 30;
     chrome.alarms.create("sentinelbit_clipboard_clear", { delayInMinutes: Math.max(0.1, sec / 60) });
     sendResponse({ status: "scheduled" });
+  } else if (request.action === "SET_ACTIVE_2FA_SESSION") {
+    const { origin, secret, username } = request;
+    const tabId = sender.tab ? sender.tab.id : null;
+    const sessionData = {
+      origin: origin ? origin.toLowerCase() : "",
+      secret,
+      username: username || "",
+      timestamp: Date.now()
+    };
+    if (tabId) {
+      active2FaSessions.set(tabId, sessionData);
+    }
+    latest2FaSession = sessionData;
+    sendResponse({ status: "ok" });
+  } else if (request.action === "GET_ACTIVE_2FA_SESSION") {
+    const tabId = sender.tab ? sender.tab.id : null;
+    const reqOrigin = (request.origin || "").toLowerCase();
+    let session = tabId ? active2FaSessions.get(tabId) : null;
+    if (!session && latest2FaSession) {
+      if (Date.now() - latest2FaSession.timestamp < 120000) {
+        const baseLatest = getBaseDomain(extractDomain(latest2FaSession.origin || ""));
+        const baseReq = getBaseDomain(extractDomain(reqOrigin || ""));
+        if (!reqOrigin || !latest2FaSession.origin || reqOrigin === latest2FaSession.origin || (baseLatest && baseLatest === baseReq)) {
+          session = latest2FaSession;
+        }
+      }
+    }
+    if (session && (Date.now() - session.timestamp < 120000)) {
+      sendResponse({ status: "ok", session });
+    } else {
+      sendResponse({ status: "none" });
+    }
+  } else if (request.action === "CLEAR_ACTIVE_2FA_SESSION") {
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (tabId) active2FaSessions.delete(tabId);
+    latest2FaSession = null;
+    sendResponse({ status: "ok" });
   } else if (request.action === "GET_MATCHING_LOGINS") {
     const hostname = extractDomain(request.url || "");
     chrome.storage.local.get(["excluded_domains"], async (loc) => {

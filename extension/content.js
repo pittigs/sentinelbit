@@ -363,6 +363,8 @@ function findOtpInputs(allInputs) {
     const id = (el.id || "").toLowerCase();
     const ph = (el.placeholder || "").toLowerCase();
     const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+    const inputMode = (el.getAttribute("inputmode") || "").toLowerCase();
+    const pattern = (el.getAttribute("pattern") || "").toLowerCase();
     const max = parseInt(el.getAttribute("maxlength") || "99", 10);
     const combined = `${name} ${id} ${ph} ${aria}`;
 
@@ -370,12 +372,43 @@ function findOtpInputs(allInputs) {
       candidates.push({ el, score: 100 });
       continue;
     }
-    if (combined.includes("otp") || combined.includes("totp") || combined.includes("2fa") || combined.includes("mfa") || combined.includes("authenticator") || combined.includes("auth-code") || combined.includes("authcode") || combined.includes("verificationcode") || combined.includes("securitycode")) {
+    if (
+      combined.includes("otp") ||
+      combined.includes("totp") ||
+      combined.includes("2fa") ||
+      combined.includes("mfa") ||
+      combined.includes("authenticator") ||
+      combined.includes("auth-code") ||
+      combined.includes("authcode") ||
+      combined.includes("verificationcode") ||
+      combined.includes("securitycode") ||
+      combined.includes("twofactor") ||
+      combined.includes("two-factor") ||
+      combined.includes("zweistufig") ||
+      combined.includes("passcode") ||
+      id.includes("app_totp") ||
+      name === "otc" ||
+      name === "otccode" ||
+      name === "totppin"
+    ) {
       candidates.push({ el, score: 90 });
       continue;
     }
-    if ((combined.includes("code") || combined.includes("token") || combined.includes("pin") || combined.includes("verify") || combined.includes("bestätigung") || combined.includes("sicherheit")) && (max <= 8 || t === "tel" || t === "number")) {
+    if (
+      (combined.includes("code") ||
+        combined.includes("token") ||
+        combined.includes("pin") ||
+        combined.includes("verify") ||
+        combined.includes("bestätigung") ||
+        combined.includes("sicherheit") ||
+        combined.includes("security")) &&
+      (max <= 8 || t === "tel" || t === "number" || inputMode === "numeric")
+    ) {
       candidates.push({ el, score: 80 });
+      continue;
+    }
+    if (inputMode === "numeric" && (max === 6 || max === 8 || pattern.includes("[0-9]"))) {
+      candidates.push({ el, score: 70 });
       continue;
     }
   }
@@ -386,34 +419,120 @@ function findOtpInputs(allInputs) {
 function findSegmentedOtpInputs(allInputs) {
   const singleCharInputs = allInputs.filter(el => {
     if (!isElementFillable(el)) return false;
+    const t = (el.type || "").toLowerCase();
+    if (t === "password") return false;
     const max = el.getAttribute("maxlength");
     const size = el.getAttribute("size");
     return max === "1" || size === "1";
   });
-  if (singleCharInputs.length >= 6) {
-    return singleCharInputs.slice(0, 6);
+  if (singleCharInputs.length >= 4 && singleCharInputs.length <= 8) {
+    return singleCharInputs;
   }
   return [];
 }
 
+function attachSegmentedPasteListeners(allInputs) {
+  const segmented = findSegmentedOtpInputs(allInputs);
+  if (segmented.length < 4) return;
+  segmented.forEach(input => {
+    if (input._sbPasteBound) return;
+    input._sbPasteBound = true;
+    input.addEventListener("paste", (e) => {
+      const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+      const clean = text.trim().replace(/\D/g, "");
+      if (clean && clean.length >= 4) {
+        e.preventDefault();
+        fillOtpInputs(clean, allInputs);
+        showInPageNotification(`✓ 2FA-Code (${clean}) auf Felder verteilt!`, "⏱️");
+      }
+    });
+  });
+}
+
 function fillOtpInputs(totpCode, allInputs) {
   if (!totpCode) return false;
-  const single = findOtpInputs(allInputs);
-  if (single.length > 0) {
-    setInputValue(single[0], totpCode);
-    return true;
-  }
+  const cleanCode = String(totpCode).trim().replace(/\D/g, "");
+  if (!cleanCode) return false;
+
+  // 1. Check for segmented inputs (4 to 8 individual boxes) FIRST
   const segmented = findSegmentedOtpInputs(allInputs);
-  if (segmented.length === 6 && totpCode.length === 6) {
-    for (let i = 0; i < 6; i++) {
-      setInputValue(segmented[i], totpCode[i]);
+  if (segmented.length >= cleanCode.length && cleanCode.length >= 4) {
+    for (let i = 0; i < cleanCode.length; i++) {
+      setInputValue(segmented[i], cleanCode[i]);
     }
+    segmented[cleanCode.length - 1].dispatchEvent(new Event("change", { bubbles: true }));
+    segmented[cleanCode.length - 1].focus();
     return true;
   }
+
+  // 2. Single unified OTP input (exclude single-character inputs)
+  const single = findOtpInputs(allInputs).filter(el => {
+    const max = parseInt(el.getAttribute("maxlength") || "99", 10);
+    return max > 1;
+  });
+  if (single.length > 0) {
+    setInputValue(single[0], cleanCode);
+    single[0].dispatchEvent(new Event("change", { bubbles: true }));
+    single[0].focus();
+    return true;
+  }
+
   return false;
 }
 
 let lastAutofilledSession = null;
+let is2FaAutofillInProgress = false;
+
+async function checkAndAutofill2Fa() {
+  if (is2FaAutofillInProgress) return;
+  const allInputs = getAllInputs(document).filter(isElementFillable);
+  if (allInputs.length === 0) return;
+
+  attachSegmentedPasteListeners(allInputs);
+
+  const otpInputs = findOtpInputs(allInputs);
+  const segmented = findSegmentedOtpInputs(allInputs);
+  const hasOtpFields = otpInputs.length > 0 || segmented.length >= 4;
+  if (!hasOtpFields) return;
+
+  const hasPassword = allInputs.some(el => (el.type || "").toLowerCase() === "password");
+
+  is2FaAutofillInProgress = true;
+  try {
+    chrome.runtime.sendMessage({ action: "GET_ACTIVE_2FA_SESSION", origin: window.location.origin }, async (res) => {
+      if (!chrome.runtime.lastError && res && res.status === "ok" && res.session?.secret) {
+        const freshTotp = await generateTotpInBrowser(res.session.secret);
+        if (freshTotp && freshTotp.code) {
+          const filled = fillOtpInputs(freshTotp.code, allInputs);
+          if (filled) {
+            await copyToClipboard(freshTotp.code);
+            showInPageNotification(`✓ 2FA-Code (${freshTotp.code}) automatisch erkannt & eingefügt!`, "⏱️");
+            chrome.runtime.sendMessage({ action: "CLEAR_ACTIVE_2FA_SESSION" });
+            return;
+          }
+        }
+      }
+
+      // Fallback: If no recent session from step 1, but we are on a pure 2FA page (no password field)
+      // and exactly 1 matching vault login has a TOTP secret
+      if (!hasPassword && activeMatchingLogins.length > 0) {
+        const loginsWithTotp = activeMatchingLogins.filter(it => !!it.totp);
+        if (loginsWithTotp.length === 1) {
+          const freshTotp = await generateTotpInBrowser(loginsWithTotp[0].totp);
+          if (freshTotp && freshTotp.code) {
+            const filled = fillOtpInputs(freshTotp.code, allInputs);
+            if (filled) {
+              await copyToClipboard(freshTotp.code);
+              showInPageNotification(`✓ 2FA-Code (${freshTotp.code}) für ${loginsWithTotp[0].username || 'Account'} eingefügt!`, "⏱️");
+            }
+          }
+        }
+      }
+    });
+  } finally {
+    setTimeout(() => { is2FaAutofillInProgress = false; }, 1000);
+  }
+}
 
 // Drag-and-Drop Autofill Fallback (#15)
 document.addEventListener("drop", (e) => {
@@ -472,6 +591,14 @@ async function executeAutofill(username, password, totp = "", passkey = null, cu
         code: currentTotpCode,
         timestamp: Date.now()
       };
+      try {
+        chrome.runtime.sendMessage({
+          action: "SET_ACTIVE_2FA_SESSION",
+          origin: window.location.origin,
+          secret: totp,
+          username: username || ""
+        });
+      } catch (e) {}
     }
   }
 
@@ -830,6 +957,8 @@ let hideTimer = null;
 function initInPageAutofill() {
   if (isSentinelBitVaultPage) return;
 
+  checkAndAutofill2Fa();
+
   try {
     chrome.runtime.sendMessage(
       { action: "GET_MATCHING_LOGINS", url: window.location.href },
@@ -844,6 +973,7 @@ function initInPageAutofill() {
         if (activeMatchingLogins.length > 0 || activeMatchingPasskeys.length > 0) {
           ensureOverlayContainer();
           attachFieldListeners();
+          checkAndAutofill2Fa();
         } else {
           removeOverlayContainer();
         }
@@ -1428,23 +1558,49 @@ function openDropdown() {
   }
 
   // 2. Render Logins
+  const isTargetOtp = activeTargetInput ? (() => {
+    const auto = (activeTargetInput.autocomplete || "").toLowerCase();
+    const name = (activeTargetInput.name || "").toLowerCase();
+    const id = (activeTargetInput.id || "").toLowerCase();
+    const ph = (activeTargetInput.placeholder || "").toLowerCase();
+    const aria = (activeTargetInput.getAttribute("aria-label") || "").toLowerCase();
+    const combined = `${name} ${id} ${ph} ${aria}`;
+    const max = parseInt(activeTargetInput.getAttribute("maxlength") || "99", 10);
+    return auto === "one-time-code" || combined.includes("otp") || combined.includes("totp") || combined.includes("2fa") || combined.includes("mfa") || (max <= 8 && (combined.includes("code") || combined.includes("token") || combined.includes("pin")));
+  })() : false;
+
   activeMatchingLogins.forEach(match => {
     const row = document.createElement("div");
     row.className = "sb-item-row";
+    const hasTotp = !!match.totp;
+    const isOtpMode = isTargetOtp && hasTotp;
+
     row.innerHTML = `
       <div class="sb-item-info">
         <div class="sb-item-title">${escapeHtml(match.title || match.url || 'Gespeicherter Account')}</div>
         <div class="sb-item-user">
           ${escapeHtml(match.username || 'Kein Benutzername')}
-          ${match.totp ? ' · <span style="color: #34d399; font-weight: 600;">⏱️ 2FA</span>' : ''}
+          ${hasTotp ? ' · <span style="color: #34d399; font-weight: 600;">⏱️ 2FA</span>' : ''}
         </div>
       </div>
-      <button class="sb-item-action">⚡ Ausfüllen</button>
+      <button class="sb-item-action" style="${isOtpMode ? 'background: #059669;' : ''}">${isOtpMode ? '⏱️ 2FA einfügen' : '⚡ Ausfüllen'}</button>
     `;
 
-    row.addEventListener("click", (e) => {
+    row.addEventListener("click", async (e) => {
       e.stopPropagation();
-      executeAutofill(match.username, match.password, match.totp);
+      if (isOtpMode) {
+        const fresh = await generateTotpInBrowser(match.totp);
+        if (fresh && fresh.code) {
+          const allInputs = getAllInputs(document).filter(isElementFillable);
+          fillOtpInputs(fresh.code, allInputs);
+          await copyToClipboard(fresh.code);
+          showInPageNotification(`✓ 2FA-Code (${fresh.code}) eingefügt & kopiert!`, "⏱️");
+        } else {
+          executeAutofill(match.username, match.password, match.totp);
+        }
+      } else {
+        executeAutofill(match.username, match.password, match.totp);
+      }
       closeDropdown();
       hideTrigger();
     });
@@ -1568,23 +1724,8 @@ if (!isSentinelBitVaultPage) {
   const domObserver = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
-      // Auto-fill Step 2 OTP if previous login occurred within 90 seconds
-      if (lastAutofilledSession && (Date.now() - lastAutofilledSession.timestamp < 90000)) {
-        const fillable = getAllInputs(document).filter(isElementFillable);
-        const otpInputs = findOtpInputs(fillable);
-        const segmented = findSegmentedOtpInputs(fillable);
-        if (otpInputs.length > 0 || segmented.length === 6) {
-          const freshTotp = await generateTotpInBrowser(lastAutofilledSession.secret);
-          if (freshTotp && freshTotp.code) {
-            const filled = fillOtpInputs(freshTotp.code, fillable);
-            if (filled) {
-              await copyToClipboard(freshTotp.code);
-              showInPageNotification(`✓ 2FA-Code (${freshTotp.code}) automatisch erkannt & eingefügt!`, "⏱️");
-              lastAutofilledSession = null;
-            }
-          }
-        }
-      }
+      // Auto-fill Step 2 OTP across redirects / dynamic modals
+      checkAndAutofill2Fa();
 
       if (activeMatchingLogins.length > 0 || activeMatchingPasskeys.length > 0) {
         attachFieldListeners();
