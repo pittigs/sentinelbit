@@ -1703,7 +1703,9 @@ async function handleWebAuthnGetRequest(requestId, options) {
       }
 
       try {
+        console.log("[sentinelbit] User approved passkey assertion for rpId:", rpId, passkey);
         const assertion = await signWebAuthnAssertion(passkey, rpId, challenge);
+        console.log("[sentinelbit] Successfully generated assertion:", assertion);
         showInPageNotification(`✓ Mit Passkey (${passkey.username || rpId}) angemeldet!`, "⚡");
         window.postMessage({
           source: "SENTINELBIT_CONTENT_WEBAUTHN",
@@ -1712,8 +1714,8 @@ async function handleWebAuthnGetRequest(requestId, options) {
           data: assertion
         }, "*");
       } catch (err) {
-        console.warn("[sentinelbit] Passkey signing error:", err);
-        showInPageNotification("Passkey-Signierung fehlgeschlagen", "⚠️");
+        console.error("[sentinelbit] Passkey signing error:", err);
+        showInPageNotification("Passkey-Signierung fehlgeschlagen: " + (err.message || err), "⚠️", 5000);
         window.postMessage({
           source: "SENTINELBIT_CONTENT_WEBAUTHN",
           requestId,
@@ -1828,21 +1830,117 @@ function bufferToBase64Url(buffer) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function base64UrlToBuffer(base64url) {
-  if (!base64url) return new Uint8Array(0);
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((base64url.length + 3) % 4);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function base64UrlToBuffer(str) {
+  if (!str) return new Uint8Array(0);
+  if (str instanceof Uint8Array) return str;
+  if (str instanceof ArrayBuffer) return new Uint8Array(str);
+  let clean = String(str).trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  clean = clean.replace(/=+$/, "");
+  const rem = clean.length % 4;
+  if (rem === 2) clean += "==";
+  else if (rem === 3) clean += "=";
+  else if (rem === 1) clean += "===";
+  try {
+    const binary = atob(clean);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch (e) {
+    console.warn("[sentinelbit] base64 decode error for:", str, e);
+    return new Uint8Array(0);
+  }
 }
 
 function base64ToBuffer(b64) {
-  if (!b64) return new Uint8Array(0);
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  return base64UrlToBuffer(b64);
+}
+
+function wrapSec1ToPkcs8(sec1Bytes) {
+  const algId = new Uint8Array([
+    0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+    0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07
+  ]);
+  const version = new Uint8Array([0x02, 0x01, 0x00]);
+
+  let octetHeader;
+  if (sec1Bytes.length < 128) {
+    octetHeader = new Uint8Array([0x04, sec1Bytes.length]);
+  } else if (sec1Bytes.length < 256) {
+    octetHeader = new Uint8Array([0x04, 0x81, sec1Bytes.length]);
+  } else {
+    octetHeader = new Uint8Array([0x04, 0x82, (sec1Bytes.length >> 8) & 0xff, sec1Bytes.length & 0xff]);
+  }
+
+  const contentLen = version.length + algId.length + octetHeader.length + sec1Bytes.length;
+  let seqHeader;
+  if (contentLen < 128) {
+    seqHeader = new Uint8Array([0x30, contentLen]);
+  } else if (contentLen < 256) {
+    seqHeader = new Uint8Array([0x30, 0x81, contentLen]);
+  } else {
+    seqHeader = new Uint8Array([0x30, 0x82, (contentLen >> 8) & 0xff, contentLen & 0xff]);
+  }
+
+  const result = new Uint8Array(seqHeader.length + contentLen);
+  let offset = 0;
+  result.set(seqHeader, offset); offset += seqHeader.length;
+  result.set(version, offset); offset += version.length;
+  result.set(algId, offset); offset += algId.length;
+  result.set(octetHeader, offset); offset += octetHeader.length;
+  result.set(sec1Bytes, offset);
+  return result;
+}
+
+async function importSec1OrPkcs8(derBytes) {
+  if (!derBytes || derBytes.length === 0) {
+    throw new Error("Leere Schlüsseldaten");
+  }
+
+  // Raw 32-byte private key scalar (d)
+  if (derBytes.length === 32) {
+    const pkcs8Prefix = new Uint8Array([
+      0x30, 0x51, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48,
+      0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
+      0x01, 0x07, 0x04, 0x37, 0x30, 0x35, 0x02, 0x01, 0x01, 0x04, 0x20
+    ]);
+    const fullPkcs8 = new Uint8Array(pkcs8Prefix.length + 32);
+    fullPkcs8.set(pkcs8Prefix, 0);
+    fullPkcs8.set(derBytes, pkcs8Prefix.length);
+    return await crypto.subtle.importKey(
+      "pkcs8",
+      fullPkcs8.buffer,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"]
+    );
+  }
+
+  // Try direct PKCS#8 import first
+  try {
+    const buf = derBytes.buffer.slice(derBytes.byteOffset, derBytes.byteOffset + derBytes.byteLength);
+    return await crypto.subtle.importKey(
+      "pkcs8",
+      buf,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"]
+    );
+  } catch (ePkcs8) {
+    // If not standard PKCS#8, it might be SEC1 (ECPrivateKey) DER: wrap into PKCS#8
+    try {
+      const wrapped = wrapSec1ToPkcs8(derBytes);
+      return await crypto.subtle.importKey(
+        "pkcs8",
+        wrapped.buffer,
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["sign"]
+      );
+    } catch (eSec1) {
+      console.error("[sentinelbit] Failed to import key as PKCS#8 and SEC1:", ePkcs8, eSec1);
+      throw ePkcs8;
+    }
+  }
 }
 
 function rawEcdsaToDer(signatureBytes) {
@@ -1879,40 +1977,43 @@ function rawEcdsaToDer(signatureBytes) {
 async function importEcdsaPrivateKey(keyMaterial) {
   if (!keyMaterial) throw new Error("Private key material missing");
 
+  // 1. JSON string or object envelope
+  if (typeof keyMaterial === "string" && keyMaterial.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(keyMaterial);
+      if (parsed.private_pem || parsed.raw_key) {
+        return await importEcdsaPrivateKey(parsed.private_pem || parsed.raw_key);
+      }
+      if (parsed.kty === "EC" || parsed.d) {
+        return await crypto.subtle.importKey("jwk", parsed, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+      }
+    } catch (_) {}
+  } else if (typeof keyMaterial === "object" && !(keyMaterial instanceof ArrayBuffer) && !(keyMaterial instanceof Uint8Array)) {
+    if (keyMaterial.private_pem || keyMaterial.raw_key) {
+      return await importEcdsaPrivateKey(keyMaterial.private_pem || keyMaterial.raw_key);
+    }
+    if (keyMaterial.kty === "EC" || keyMaterial.d) {
+      return await crypto.subtle.importKey("jwk", keyMaterial, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    }
+  }
+
+  // 2. PEM format
   if (typeof keyMaterial === "string" && keyMaterial.includes("-----BEGIN")) {
     const b64 = keyMaterial.replace(/-----BEGIN[^-]+-----/g, "").replace(/-----END[^-]+-----/g, "").replace(/\s+/g, "");
-    const der = base64ToBuffer(b64);
-    return await crypto.subtle.importKey("pkcs8", der.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    const der = base64UrlToBuffer(b64);
+    return await importSec1OrPkcs8(der);
   }
 
+  // 3. String base64 / base64url or raw key
   if (typeof keyMaterial === "string") {
-    let cleanB64 = keyMaterial.trim();
-    let derBytes = base64UrlToBuffer(cleanB64);
-    if (!derBytes || derBytes.length === 0) {
-      derBytes = base64ToBuffer(cleanB64);
-    }
-
-    try {
-      return await crypto.subtle.importKey("pkcs8", derBytes.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-    } catch (e1) {
-      if (derBytes.length === 32) {
-        const pkcs8Prefix = new Uint8Array([
-          0x30, 0x51, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48,
-          0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
-          0x01, 0x07, 0x04, 0x37, 0x30, 0x35, 0x02, 0x01, 0x01, 0x04, 0x20
-        ]);
-        const fullPkcs8 = new Uint8Array(pkcs8Prefix.length + 32);
-        fullPkcs8.set(pkcs8Prefix, 0);
-        fullPkcs8.set(derBytes, pkcs8Prefix.length);
-        return await crypto.subtle.importKey("pkcs8", fullPkcs8.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-      }
-      throw e1;
-    }
+    const derBytes = base64UrlToBuffer(keyMaterial);
+    return await importSec1OrPkcs8(derBytes);
   }
 
+  // 4. ArrayBuffer or Uint8Array
   if (keyMaterial instanceof ArrayBuffer || keyMaterial instanceof Uint8Array) {
-    const buf = keyMaterial instanceof Uint8Array ? keyMaterial.buffer : keyMaterial;
-    return await crypto.subtle.importKey("pkcs8", buf, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    const bytes = keyMaterial instanceof Uint8Array ? keyMaterial : new Uint8Array(keyMaterial);
+    return await importSec1OrPkcs8(bytes);
   }
 
   throw new Error("Unsupported private key format");

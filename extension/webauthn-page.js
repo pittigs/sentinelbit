@@ -34,15 +34,32 @@
     return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
-  function base64UrlToBuffer(base64url) {
-    if (!base64url) return new Uint8Array(0);
-    const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((base64url.length + 3) % 4);
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+  function base64UrlToBuffer(str) {
+    if (!str) return new Uint8Array(0);
+    if (str instanceof Uint8Array) return str;
+    if (str instanceof ArrayBuffer) return new Uint8Array(str);
+    let clean = String(str).trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+    clean = clean.replace(/=+$/, "");
+    const rem = clean.length % 4;
+    if (rem === 2) clean += "==";
+    else if (rem === 3) clean += "=";
+    else if (rem === 1) clean += "===";
+    try {
+      const binary = atob(clean);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch (e) {
+      console.warn("[sentinelbit] base64 decode error for:", str, e);
+      return new Uint8Array(0);
     }
-    return bytes;
+  }
+
+  function toArrayBuffer(uint8) {
+    if (!uint8 || uint8.length === 0) return new ArrayBuffer(0);
+    return uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength);
   }
 
   // Ensure Platform Authenticator feature discovery passes
@@ -135,25 +152,71 @@
             const sigBytes = base64UrlToBuffer(assertionData.signatureB64);
             const userHandleBytes = assertionData.userHandleB64 ? base64UrlToBuffer(assertionData.userHandleB64) : null;
 
-            // Construct compliant PublicKeyCredential
-            const cred = Object.create(window.PublicKeyCredential ? window.PublicKeyCredential.prototype : Object.prototype);
-            cred.id = assertionData.id;
-            cred.rawId = rawIdBytes.buffer;
-            cred.type = "public-key";
-            cred.authenticatorAttachment = "platform";
+            const clientDataBuf = toArrayBuffer(clientDataBytes);
+            const authDataBuf = toArrayBuffer(authDataBytes);
+            const sigBuf = toArrayBuffer(sigBytes);
+            const userHandleBuf = userHandleBytes && userHandleBytes.length > 0 ? toArrayBuffer(userHandleBytes) : null;
+            const rawIdBuf = toArrayBuffer(rawIdBytes);
+            const idB64Url = bufferToBase64Url(rawIdBytes) || assertionData.id;
 
-            const resp = Object.create(window.AuthenticatorAssertionResponse ? window.AuthenticatorAssertionResponse.prototype : Object.prototype);
-            resp.clientDataJSON = clientDataBytes.buffer;
-            resp.authenticatorData = authDataBytes.buffer;
-            resp.signature = sigBytes.buffer;
-            resp.userHandle = userHandleBytes ? userHandleBytes.buffer : null;
-            cred.response = resp;
-            cred.getClientExtensionResults = () => ({});
+            // Construct AuthenticatorAssertionResponse with own property descriptors
+            // to shadow WebIDL getters and prevent Illegal invocation errors
+            const respProto = (window.AuthenticatorAssertionResponse && window.AuthenticatorAssertionResponse.prototype)
+              ? window.AuthenticatorAssertionResponse.prototype
+              : Object.prototype;
+            const resp = Object.create(respProto);
 
-            console.log("[sentinelbit] Successfully resolved credentials.get with passkey assertion");
+            Object.defineProperties(resp, {
+              clientDataJSON: { value: clientDataBuf, enumerable: true, configurable: true, writable: false },
+              authenticatorData: { value: authDataBuf, enumerable: true, configurable: true, writable: false },
+              signature: { value: sigBuf, enumerable: true, configurable: true, writable: false },
+              userHandle: { value: userHandleBuf, enumerable: true, configurable: true, writable: false }
+            });
+
+            // Construct PublicKeyCredential with own property descriptors
+            const credProto = (window.PublicKeyCredential && window.PublicKeyCredential.prototype)
+              ? window.PublicKeyCredential.prototype
+              : Object.prototype;
+            const cred = Object.create(credProto);
+
+            Object.defineProperties(cred, {
+              id: { value: idB64Url, enumerable: true, configurable: true, writable: false },
+              rawId: { value: rawIdBuf, enumerable: true, configurable: true, writable: false },
+              type: { value: "public-key", enumerable: true, configurable: true, writable: false },
+              authenticatorAttachment: { value: "platform", enumerable: true, configurable: true, writable: false },
+              response: { value: resp, enumerable: true, configurable: true, writable: false },
+              getClientExtensionResults: {
+                value: function () { return {}; },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              },
+              toJSON: {
+                value: function () {
+                  return {
+                    id: idB64Url,
+                    rawId: idB64Url,
+                    response: {
+                      clientDataJSON: bufferToBase64Url(clientDataBytes),
+                      authenticatorData: bufferToBase64Url(authDataBytes),
+                      signature: bufferToBase64Url(sigBytes),
+                      userHandle: userHandleBuf ? bufferToBase64Url(userHandleBytes) : null
+                    },
+                    authenticatorAttachment: "platform",
+                    type: "public-key",
+                    clientExtensionResults: {}
+                  };
+                },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              }
+            });
+
+            console.log("[sentinelbit] Successfully resolved credentials.get with passkey assertion:", cred);
             resolve(cred);
           } catch (err) {
-            console.warn("[sentinelbit] Assertion construction error, falling back to native:", err);
+            console.error("[sentinelbit] Assertion construction error, falling back to native:", err);
             origGet.call(navigator.credentials, options).then(resolve).catch(reject);
           }
         },
@@ -220,37 +283,92 @@
             const rawIdBytes = base64UrlToBuffer(attestationData.rawIdB64 || attestationData.id);
             const clientDataBytes = base64UrlToBuffer(attestationData.clientDataB64);
             const attObjBytes = base64UrlToBuffer(attestationData.attestationObjectB64);
+            const authDataBytes = attestationData.authDataB64 ? base64UrlToBuffer(attestationData.authDataB64) : new Uint8Array(0);
+            const spkiBytes = attestationData.spkiB64 ? base64UrlToBuffer(attestationData.spkiB64) : null;
 
-            const cred = Object.create(window.PublicKeyCredential ? window.PublicKeyCredential.prototype : Object.prototype);
-            cred.id = attestationData.id;
-            cred.rawId = rawIdBytes.buffer;
-            cred.type = "public-key";
-            cred.authenticatorAttachment = "platform";
+            const clientDataBuf = toArrayBuffer(clientDataBytes);
+            const attObjBuf = toArrayBuffer(attObjBytes);
+            const authDataBuf = toArrayBuffer(authDataBytes);
+            const spkiBuf = spkiBytes ? toArrayBuffer(spkiBytes) : null;
+            const rawIdBuf = toArrayBuffer(rawIdBytes);
+            const idB64Url = bufferToBase64Url(rawIdBytes) || attestationData.id;
 
-            const resp = Object.create(window.AuthenticatorAttestationResponse ? window.AuthenticatorAttestationResponse.prototype : Object.prototype);
-            resp.clientDataJSON = clientDataBytes.buffer;
-            resp.attestationObject = attObjBytes.buffer;
-            resp.getAuthenticatorData = () => {
-              if (attestationData.authDataB64) {
-                return base64UrlToBuffer(attestationData.authDataB64).buffer;
+            const respProto = (window.AuthenticatorAttestationResponse && window.AuthenticatorAttestationResponse.prototype)
+              ? window.AuthenticatorAttestationResponse.prototype
+              : Object.prototype;
+            const resp = Object.create(respProto);
+
+            Object.defineProperties(resp, {
+              clientDataJSON: { value: clientDataBuf, enumerable: true, configurable: true, writable: false },
+              attestationObject: { value: attObjBuf, enumerable: true, configurable: true, writable: false },
+              getAuthenticatorData: {
+                value: function () { return authDataBuf; },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              },
+              getPublicKey: {
+                value: function () { return spkiBuf; },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              },
+              getPublicKeyAlgorithm: {
+                value: function () { return -7; },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              },
+              getTransports: {
+                value: function () { return ["internal", "hybrid"]; },
+                enumerable: true,
+                configurable: true,
+                writable: false
               }
-              return new ArrayBuffer(0);
-            };
-            resp.getPublicKey = () => {
-              if (attestationData.spkiB64) {
-                return base64UrlToBuffer(attestationData.spkiB64).buffer;
-              }
-              return null;
-            };
-            resp.getPublicKeyAlgorithm = () => -7;
-            resp.getTransports = () => ["internal", "hybrid"];
-            cred.response = resp;
-            cred.getClientExtensionResults = () => ({});
+            });
 
-            console.log("[sentinelbit] Successfully registered new passkey");
+            const credProto = (window.PublicKeyCredential && window.PublicKeyCredential.prototype)
+              ? window.PublicKeyCredential.prototype
+              : Object.prototype;
+            const cred = Object.create(credProto);
+
+            Object.defineProperties(cred, {
+              id: { value: idB64Url, enumerable: true, configurable: true, writable: false },
+              rawId: { value: rawIdBuf, enumerable: true, configurable: true, writable: false },
+              type: { value: "public-key", enumerable: true, configurable: true, writable: false },
+              authenticatorAttachment: { value: "platform", enumerable: true, configurable: true, writable: false },
+              response: { value: resp, enumerable: true, configurable: true, writable: false },
+              getClientExtensionResults: {
+                value: function () { return {}; },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              },
+              toJSON: {
+                value: function () {
+                  return {
+                    id: idB64Url,
+                    rawId: idB64Url,
+                    response: {
+                      clientDataJSON: bufferToBase64Url(clientDataBytes),
+                      attestationObject: bufferToBase64Url(attObjBytes),
+                      transports: ["internal", "hybrid"]
+                    },
+                    authenticatorAttachment: "platform",
+                    type: "public-key",
+                    clientExtensionResults: {}
+                  };
+                },
+                enumerable: true,
+                configurable: true,
+                writable: false
+              }
+            });
+
+            console.log("[sentinelbit] Successfully registered new passkey:", cred);
             resolve(cred);
           } catch (err) {
-            console.warn("[sentinelbit] Attestation construction error, falling back to native:", err);
+            console.error("[sentinelbit] Attestation construction error, falling back to native:", err);
             origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
           }
         },
