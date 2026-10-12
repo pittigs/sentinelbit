@@ -98,9 +98,10 @@
   // -------------------------------------------------------------
   // 1. Intercept navigator.credentials.get (Assertion / Login)
   // -------------------------------------------------------------
-  navigator.credentials.get = async function (options) {
+  async function sentinelbitCredentialsGet(options) {
+    console.log("[sentinelbit] Intercepted credentials.get:", options);
     if (!options || !options.publicKey) {
-      return origGet(options);
+      return origGet.call(navigator.credentials, options);
     }
 
     const pk = options.publicKey;
@@ -119,7 +120,8 @@
       const timeoutTimer = setTimeout(() => {
         if (pendingRequests.has(reqId)) {
           pendingRequests.delete(reqId);
-          origGet(options).then(resolve).catch(reject);
+          console.log("[sentinelbit] credentials.get timed out, falling back to native");
+          origGet.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       }, timeoutMs);
 
@@ -148,19 +150,21 @@
             cred.response = resp;
             cred.getClientExtensionResults = () => ({});
 
+            console.log("[sentinelbit] Successfully resolved credentials.get with passkey assertion");
             resolve(cred);
           } catch (err) {
             console.warn("[sentinelbit] Assertion construction error, falling back to native:", err);
-            origGet(options).then(resolve).catch(reject);
+            origGet.call(navigator.credentials, options).then(resolve).catch(reject);
           }
         },
         fallback: () => {
           clearTimeout(timeoutTimer);
-          origGet(options).then(resolve).catch(reject);
+          console.log("[sentinelbit] Fallback requested, calling native credentials.get");
+          origGet.call(navigator.credentials, options).then(resolve).catch(reject);
         },
         reject: (err) => {
           clearTimeout(timeoutTimer);
-          origGet(options).then(resolve).catch(reject);
+          origGet.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       });
 
@@ -178,14 +182,15 @@
         }
       }, "*");
     });
-  };
+  }
 
   // -------------------------------------------------------------
   // 2. Intercept navigator.credentials.create (Attestation / Register)
   // -------------------------------------------------------------
-  navigator.credentials.create = async function (options) {
+  async function sentinelbitCredentialsCreate(options) {
+    console.log("[sentinelbit] Intercepted credentials.create:", options);
     if (!options || !options.publicKey) {
-      return origCreate(options);
+      return origCreate.call(navigator.credentials, options);
     }
 
     const pk = options.publicKey;
@@ -203,7 +208,8 @@
       const timeoutTimer = setTimeout(() => {
         if (pendingRequests.has(reqId)) {
           pendingRequests.delete(reqId);
-          origCreate(options).then(resolve).catch(reject);
+          console.log("[sentinelbit] credentials.create timed out, falling back to native");
+          origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       }, timeoutMs);
 
@@ -241,19 +247,21 @@
             cred.response = resp;
             cred.getClientExtensionResults = () => ({});
 
+            console.log("[sentinelbit] Successfully registered new passkey");
             resolve(cred);
           } catch (err) {
             console.warn("[sentinelbit] Attestation construction error, falling back to native:", err);
-            origCreate(options).then(resolve).catch(reject);
+            origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
           }
         },
         fallback: () => {
           clearTimeout(timeoutTimer);
-          origCreate(options).then(resolve).catch(reject);
+          console.log("[sentinelbit] Fallback requested, calling native credentials.create");
+          origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
         },
         reject: (err) => {
           clearTimeout(timeoutTimer);
-          origCreate(options).then(resolve).catch(reject);
+          origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       });
 
@@ -269,7 +277,42 @@
         }
       }, "*");
     });
-  };
+  }
 
-  console.debug("[sentinelbit] WebAuthn Passkey Interceptor active.");
+  // Hook prototype and instance
+  if (window.CredentialsContainer && CredentialsContainer.prototype) {
+    try {
+      Object.defineProperty(CredentialsContainer.prototype, "get", {
+        value: sentinelbitCredentialsGet,
+        writable: true,
+        configurable: true
+      });
+      Object.defineProperty(CredentialsContainer.prototype, "create", {
+        value: sentinelbitCredentialsCreate,
+        writable: true,
+        configurable: true
+      });
+    } catch (_) {
+      CredentialsContainer.prototype.get = sentinelbitCredentialsGet;
+      CredentialsContainer.prototype.create = sentinelbitCredentialsCreate;
+    }
+  }
+
+  try {
+    Object.defineProperty(navigator.credentials, "get", {
+      value: sentinelbitCredentialsGet,
+      writable: true,
+      configurable: true
+    });
+    Object.defineProperty(navigator.credentials, "create", {
+      value: sentinelbitCredentialsCreate,
+      writable: true,
+      configurable: true
+    });
+  } catch (_) {
+    navigator.credentials.get = sentinelbitCredentialsGet;
+    navigator.credentials.create = sentinelbitCredentialsCreate;
+  }
+
+  console.info("[sentinelbit] WebAuthn Passkey Interceptor hooked into CredentialsContainer.");
 })();

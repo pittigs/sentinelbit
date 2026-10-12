@@ -1645,17 +1645,21 @@ function promptPasskeyCreation(rpName, rpId, username, callback) {
 
 async function handleWebAuthnGetRequest(requestId, options) {
   const { rpId, challenge, allowCredentials, mediation } = options;
+  console.log("[sentinelbit-content] handleWebAuthnGetRequest for rpId:", rpId, "allowCredentials:", allowCredentials);
 
   chrome.runtime.sendMessage({
     action: "WEBAUTHN_GET_MATCHES",
     rpId: rpId,
     allowCredentials: allowCredentials
   }, async (response) => {
+    console.log("[sentinelbit-content] WEBAUTHN_GET_MATCHES response:", response);
+
     if (response && response.status === "locked") {
       showInPageNotification("🔒 Sentinelbit ist gesperrt: Bitte Erweiterung entsperren", "🔒", 4000);
     }
 
     if (chrome.runtime.lastError || !response || response.status !== "ok" || !response.passkeys || response.passkeys.length === 0) {
+      console.log("[sentinelbit-content] No passkeys matched or error, falling back to native WebAuthn");
       window.postMessage({
         source: "SENTINELBIT_CONTENT_WEBAUTHN",
         requestId,
