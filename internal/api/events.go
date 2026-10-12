@@ -111,6 +111,8 @@ func HandleSyncEvents(db *sql.DB) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 		// Initial connection confirmation
 		_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ok\",\"user\":\"%s\"}\n\n", sess.Username)

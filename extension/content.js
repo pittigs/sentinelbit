@@ -121,7 +121,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else {
       sendResponse({ status: "not_vault_page" });
     }
-  } else if (request.action === "VAULT_CACHE_UPDATED") {
+  } else if (request.action === "VAULT_CACHE_UPDATED" || request.action === "VAULT_SYNCED") {
     initInPageAutofill();
     sendResponse({ status: "ok" });
   } else if (request.action === "CLEAR_CLIPBOARD") {

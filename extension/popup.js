@@ -149,7 +149,7 @@ async function checkServerHealth() {
   try {
     const res = await fetch(`${SERVER_URL}/api/health`, { method: "GET", cache: "no-store" });
     if (res.ok) {
-      statusEl.innerText = "Verbunden";
+      statusEl.innerHTML = `<span class="live-pulse"></span> Live`;
       statusEl.className = "status-badge";
     } else {
       statusEl.innerText = "Gesperrt";
@@ -160,6 +160,25 @@ async function checkServerHealth() {
     statusEl.className = "status-badge offline";
   }
 }
+
+// Live-Sync & Vault Broadcast Listener
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === "VAULT_SYNCED") {
+    loadCachedVault();
+    showToast(`⚡ Live synchronisiert (${msg.loginsCount || allVaultItems.length} Logins)`);
+  } else if (msg.action === "LIVE_SYNC_STATUS") {
+    const statusEl = document.getElementById("server-status");
+    if (statusEl) {
+      if (msg.connected) {
+        statusEl.innerHTML = `<span class="live-pulse"></span> Live`;
+        statusEl.className = "status-badge";
+      } else {
+        statusEl.innerText = "Offline";
+        statusEl.className = "status-badge offline";
+      }
+    }
+  }
+});
 
 // =============================================================
 // 4. TAB & DOMAIN DETECTION
@@ -452,9 +471,15 @@ function renderItems() {
           •••• •••• •••• ${last4 || 'Karte'}
         </div>
         <div class="actions">
-          <button class="btn btn-autofill btn-fill-card">💳 Ausfüllen</button>
-          <button class="btn btn-secondary btn-copy-card" title="Kartennummer kopieren">📋</button>
-          <button class="btn btn-secondary btn-copy-cvv" title="CVV kopieren">🔒</button>
+          <button class="btn btn-autofill btn-fill-card">
+            <svg class="sb-icon" style="margin-right:3px;" viewBox="0 0 24 24" stroke="currentColor"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Ausfüllen
+          </button>
+          <button class="btn btn-secondary btn-copy-card" title="Kartennummer kopieren">
+            <svg class="sb-icon" viewBox="0 0 24 24" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="btn btn-secondary btn-copy-cvv" title="CVV kopieren">
+            <svg class="sb-icon" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
         </div>
       `;
       card.querySelector(".btn-fill-card").onclick = () => executeCardAutofill(it.data || it);
@@ -467,12 +492,20 @@ function renderItems() {
           ${it.favorite ? '<span style="color: #fbbf24; font-size: 11px;">⭐</span>' : ''}
         </div>
         <div class="item-user" title="${escapeHtml(it.username || '')}">
-          <span draggable="true" class="drag-badge" data-drag="${escapeHtml(it.username || '')}" title="Ziehen zum Einfügen" style="cursor: grab;">👤 ${escapeHtml(it.username || 'Kein Benutzername')}</span>
+          <span draggable="true" class="drag-badge" data-drag="${escapeHtml(it.username || '')}" title="Ziehen zum Einfügen" style="cursor: grab;">
+            <svg class="sb-icon" style="margin-right:2px;" viewBox="0 0 24 24" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${escapeHtml(it.username || 'Kein Benutzername')}
+          </span>
         </div>
         <div class="actions">
-          <button class="btn btn-autofill">⚡ Ausfüllen</button>
-          <button class="btn btn-secondary btn-copy-pwd" draggable="true" data-drag="${escapeHtml(it.password || '')}" title="Passwort kopieren oder direkt ins Feld ziehen" style="cursor: grab;">🔑</button>
-          ${it.totp ? `<button class="btn btn-secondary btn-totp" draggable="true" data-drag="${escapeHtml(it.totp || '')}" title="2FA Code kopieren oder ziehen" style="cursor: grab;">⏱️ 2FA</button>` : ''}
+          <button class="btn btn-autofill">
+            <svg class="sb-icon" style="margin-right:3px;" viewBox="0 0 24 24" stroke="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Ausfüllen
+          </button>
+          <button class="btn btn-secondary btn-copy-pwd" draggable="true" data-drag="${escapeHtml(it.password || '')}" title="Passwort kopieren oder direkt ins Feld ziehen" style="cursor: grab;">
+            <svg class="sb-icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M21 2l-2 2m-2-2l2 2m0 0l-7.5 7.5a5 5 0 1 0 2.8 2.8L21 4v2h2V2h-2z"/></svg>
+          </button>
+          ${it.totp ? `<button class="btn btn-secondary btn-totp" draggable="true" data-drag="${escapeHtml(it.totp || '')}" title="2FA Code kopieren oder ziehen" style="cursor: grab;">
+            <svg class="sb-icon" style="margin-right:2px;" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 2FA
+          </button>` : ''}
         </div>
       `;
 
@@ -568,9 +601,15 @@ function renderPasskeys() {
         ID: <span style="font-family: monospace; color: #a5b4fc;">${escapeHtml((pk.credential_id || '').substring(0, 16))}...</span>
       </div>
       <div class="actions">
-        <button class="btn btn-autofill btn-fill-pk" style="background: #7c3aed;">⚡ Ausfüllen</button>
-        <button class="btn btn-secondary btn-copy-pk-user" title="Benutzername kopieren">👤</button>
-        <button class="btn btn-secondary btn-copy-pk-id" title="Credential ID kopieren">🔑</button>
+        <button class="btn btn-autofill btn-fill-pk" style="background: #7c3aed;">
+          <svg class="sb-icon" style="margin-right:3px;" viewBox="0 0 24 24" stroke="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Ausfüllen
+        </button>
+        <button class="btn btn-secondary btn-copy-pk-user" title="Benutzername kopieren">
+          <svg class="sb-icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </button>
+        <button class="btn btn-secondary btn-copy-pk-id" title="Credential ID kopieren">
+          <svg class="sb-icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M21 2l-2 2m-2-2l2 2m0 0l-7.5 7.5a5 5 0 1 0 2.8 2.8L21 4v2h2V2h-2z"/></svg>
+        </button>
       </div>
     `;
 
@@ -744,12 +783,22 @@ async function loginAndSyncDirectly(username, password, totpCode) {
     }
   }
 
+  // Export raw encryption key for background Live-Sync decryption
+  let encKeyB64 = null;
+  try {
+    const rawKey = await window.crypto.subtle.exportKey("raw", encKey);
+    encKeyB64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
+  } catch (e) {
+    console.debug("Could not export encKey for background sync:", e);
+  }
+
   // Step 6: Save decrypted items and passkeys strictly in-memory (session storage)
   if (chrome.storage.session) {
     await chrome.storage.session.set({
       vault_cache: logins,
       vault_passkeys: passkeys,
-      vault_token: verifyData.token
+      vault_token: verifyData.token,
+      vault_key_b64: encKeyB64
     });
   }
   // Store only non-sensitive metadata in persistent local storage
@@ -762,7 +811,7 @@ async function loginAndSyncDirectly(username, password, totpCode) {
 
   allVaultItems = logins;
   allVaultPasskeys = passkeys;
-  chrome.runtime.sendMessage({ action: "VAULT_UNLOCKED" }, () => {});
+  chrome.runtime.sendMessage({ action: "VAULT_UNLOCKED", token: verifyData.token, key_b64: encKeyB64 }, () => {});
   await loadCachedVault();
   showToast(`Erfolgreich! ${logins.length} Logins & ${passkeys.length} Passkeys bereit.`);
 }

@@ -294,6 +294,228 @@ async function getSessionData() {
   });
 }
 
+// Crypto & Live-Sync Helpers
+function hexToBuffer(hex) {
+  if (!hex) return new ArrayBuffer(0);
+  const bytes = new Uint8Array(Math.ceil(hex.length / 2));
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes.buffer;
+}
+
+function base64ToBuffer(b64) {
+  if (!b64) return new ArrayBuffer(0);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function bufferToStr(buf) {
+  return new TextDecoder().decode(buf);
+}
+
+async function decryptPayload(encryptedJsonStr, cryptoKey) {
+  try {
+    const parsed = typeof encryptedJsonStr === "string" ? JSON.parse(encryptedJsonStr) : encryptedJsonStr;
+    const iv = hexToBuffer(parsed.iv);
+    const ciphertext = hexToBuffer(parsed.data);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      cryptoKey,
+      ciphertext
+    );
+
+    return JSON.parse(bufferToStr(decrypted));
+  } catch (e) {
+    return null;
+  }
+}
+
+let isSyncing = false;
+async function performBackgroundVaultSync() {
+  if (isSyncing) return;
+  isSyncing = true;
+  try {
+    const session = await getSessionData();
+    const token = session.vault_token;
+    const keyB64 = session.vault_key_b64;
+    if (!token || !keyB64) {
+      isSyncing = false;
+      return;
+    }
+
+    const loc = await new Promise(r => chrome.storage.local.get(["server_url"], r));
+    const serverUrl = loc.server_url || "http://127.0.0.1:8000";
+
+    const keyBuf = base64ToBuffer(keyB64);
+    const encKey = await crypto.subtle.importKey(
+      "raw",
+      keyBuf,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"]
+    );
+
+    const [itemsRes, pkRes] = await Promise.all([
+      fetch(`${serverUrl}/api/vault/items`, { headers: { "Authorization": `Bearer ${token}` } }),
+      fetch(`${serverUrl}/api/passkeys`, { headers: { "Authorization": `Bearer ${token}` } })
+    ]);
+
+    if (!itemsRes.ok) {
+      isSyncing = false;
+      return;
+    }
+
+    const rawItems = await itemsRes.json();
+    let passkeys = pkRes.ok ? await pkRes.json() : [];
+
+    for (const pk of passkeys) {
+      if (pk.encrypted_private_key) {
+        if (typeof pk.encrypted_private_key === "string" && pk.encrypted_private_key.startsWith("{") && pk.encrypted_private_key.includes('"iv"')) {
+          try {
+            const dec = await decryptPayload(pk.encrypted_private_key, encKey);
+            if (dec) {
+              pk.decrypted_private_key = dec.private_pem || dec.raw_key || (typeof dec === "string" ? dec : null);
+            }
+          } catch (_) {}
+        } else {
+          pk.decrypted_private_key = pk.encrypted_private_key;
+        }
+      }
+    }
+
+    const logins = [];
+    for (const it of rawItems) {
+      if (it.type === "login") {
+        try {
+          const payload = await decryptPayload(it.encrypted_payload, encKey);
+          if (payload) {
+            logins.push({
+              id: it.id,
+              title: it.title,
+              username: payload.username || "",
+              password: payload.password || "",
+              url: payload.url || "",
+              totp: payload.totp || "",
+              favorite: it.favorite
+            });
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (chrome.storage.session) {
+      await chrome.storage.session.set({
+        vault_cache: logins,
+        vault_passkeys: passkeys
+      });
+    }
+
+    await chrome.storage.local.set({ last_synced: Date.now() });
+    console.log(`[sentinelbit-sse] Live-Sync update: ${logins.length} Logins, ${passkeys.length} Passkeys.`);
+
+    chrome.runtime.sendMessage({
+      action: "VAULT_SYNCED",
+      loginsCount: logins.length,
+      passkeysCount: passkeys.length
+    }, () => {});
+
+    chrome.tabs.query({}, (tabs) => {
+      for (const t of tabs) {
+        if (t.id) {
+          chrome.tabs.sendMessage(t.id, { action: "VAULT_SYNCED" }, () => {});
+        }
+      }
+    });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) updateBadgeForTab(tabs[0]);
+    });
+  } catch (err) {
+    console.warn("[sentinelbit-sse] Background sync error:", err);
+  } finally {
+    isSyncing = false;
+  }
+}
+
+let liveSyncAbortController = null;
+let liveSyncRunning = false;
+
+async function startLiveSync() {
+  if (liveSyncRunning) return;
+  const session = await getSessionData();
+  const token = session.vault_token;
+  if (!token) return;
+
+  const loc = await new Promise(r => chrome.storage.local.get(["server_url"], r));
+  const serverUrl = loc.server_url || "http://127.0.0.1:8000";
+
+  liveSyncRunning = true;
+  if (liveSyncAbortController) {
+    liveSyncAbortController.abort();
+  }
+  liveSyncAbortController = new AbortController();
+
+  try {
+    console.log("[sentinelbit-sse] Connecting to live-sync stream:", `${serverUrl}/api/sync/events`);
+    const res = await fetch(`${serverUrl}/api/sync/events?token=${encodeURIComponent(token)}`, {
+      headers: { "Accept": "text/event-stream" },
+      signal: liveSyncAbortController.signal
+    });
+
+    if (!res.ok) {
+      liveSyncRunning = false;
+      return;
+    }
+
+    chrome.runtime.sendMessage({ action: "LIVE_SYNC_STATUS", connected: true }, () => {});
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+
+      for (const block of parts) {
+        if (block.includes("event: vault_sync")) {
+          console.log("[sentinelbit-sse] vault_sync event received! Triggering background sync...");
+          await performBackgroundVaultSync();
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      console.debug("[sentinelbit-sse] Stream closed/disconnected:", err.message);
+    }
+  } finally {
+    liveSyncRunning = false;
+    chrome.runtime.sendMessage({ action: "LIVE_SYNC_STATUS", connected: false }, () => {});
+    setTimeout(async () => {
+      const currentSess = await getSessionData();
+      if (currentSess && currentSess.vault_token) {
+        startLiveSync();
+      }
+    }, 8000);
+  }
+}
+
+function stopLiveSync() {
+  if (liveSyncAbortController) {
+    liveSyncAbortController.abort();
+    liveSyncAbortController = null;
+  }
+  liveSyncRunning = false;
+  chrome.runtime.sendMessage({ action: "LIVE_SYNC_STATUS", connected: false }, () => {});
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "sentinelbit_autolock_check") {
     const local = await new Promise(r => chrome.storage.local.get(["auto_lock_minutes", "last_active_time"], r));
@@ -304,6 +526,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       const elapsedMin = (Date.now() - lastActive) / 60000;
       if (elapsedMin >= timeoutMin) {
         // Lock vault
+        stopLiveSync();
         if (chrome.storage.session) {
           chrome.storage.session.clear();
         }
@@ -340,23 +563,33 @@ setInterval(() => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "VAULT_UNLOCKED") {
     chrome.storage.local.set({ last_active_time: Date.now() });
+    startLiveSync();
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]) updateBadgeForTab(tabs[0]);
     });
     sendResponse({ status: "ok" });
+  } else if (request.action === "START_LIVE_SYNC") {
+    startLiveSync();
+    sendResponse({ status: "ok" });
+  } else if (request.action === "GET_LIVE_SYNC_STATUS") {
+    sendResponse({ connected: liveSyncRunning });
   } else if (request.action === "SET_SESSION_VAULT") {
     if (chrome.storage.session) {
       chrome.storage.session.set({
         vault_cache: request.items || [],
-        vault_passkeys: request.passkeys || []
+        vault_passkeys: request.passkeys || [],
+        vault_token: request.token || undefined,
+        vault_key_b64: request.key_b64 || undefined
       });
     }
     chrome.storage.local.set({ last_active_time: Date.now() });
+    startLiveSync();
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]) updateBadgeForTab(tabs[0]);
     });
     sendResponse({ status: "ok" });
   } else if (request.action === "VAULT_LOCKED") {
+    stopLiveSync();
     if (chrome.storage.session) {
       chrome.storage.session.clear();
     }
@@ -519,4 +752,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   return true;
+});
+
+// Resume Live-Sync on background worker initialization if vault session is active
+getSessionData().then((sess) => {
+  if (sess && sess.vault_token && sess.vault_key_b64) {
+    startLiveSync();
+  }
 });
