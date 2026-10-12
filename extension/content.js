@@ -1131,6 +1131,57 @@ function ensureOverlayContainer() {
         color: #818cf8;
         margin-top: 2px;
       }
+      .sb-modal-accounts {
+        margin-top: 10px;
+        margin-bottom: 6px;
+        max-height: 160px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .sb-modal-account-card {
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #1e293b;
+        border: 1px solid #334155;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        transition: all 0.15s ease;
+      }
+      .sb-modal-account-card:hover {
+        background: #283548;
+        border-color: #6366f1;
+      }
+      .sb-modal-account-card.selected {
+        background: rgba(124, 58, 237, 0.2);
+        border-color: #8b5cf6;
+      }
+      .sb-modal-account-info {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .sb-modal-account-user {
+        font-size: 13px;
+        font-weight: 600;
+        color: #f8fafc;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+      .sb-modal-account-desc {
+        font-size: 11px;
+        color: #94a3b8;
+      }
+      .sb-modal-account-check {
+        font-size: 13px;
+        color: #8b5cf6;
+        font-weight: bold;
+        margin-left: 8px;
+      }
       .sb-modal-actions {
         display: flex;
         gap: 8px;
@@ -1209,6 +1260,7 @@ function ensureOverlayContainer() {
           <div class="sb-modal-text" id="sb-pk-modal-text">Mit Passkey anmelden:</div>
           <div class="sb-modal-user" id="sb-pk-modal-user">user</div>
           <div class="sb-modal-rp" id="sb-pk-modal-rp">example.com</div>
+          <div class="sb-modal-accounts" id="sb-pk-modal-accounts" style="display:none;"></div>
         </div>
         <div class="sb-modal-actions">
           <button class="sb-modal-btn sb-modal-btn-primary" id="sb-pk-modal-confirm">⚡ Anmelden</button>
@@ -1355,12 +1407,13 @@ function openDropdown() {
       row.style.border = "1px solid rgba(139, 92, 246, 0.4)";
       row.style.background = "rgba(139, 92, 246, 0.1)";
       row.style.marginBottom = "4px";
+      const actionLabel = activeWebAuthnGetResolver ? "⚡ Anmelden" : "⚡ Passkey";
       row.innerHTML = `
         <div class="sb-item-info">
           <div class="sb-item-title" style="color: #c4b5fd;">⚡ ${escapeHtml(pk.rp_name || pk.rp_id)} (FIDO2)</div>
           <div class="sb-item-user" style="color: #cbd5e1;">Benutzer: ${escapeHtml(pk.username || 'Passkey hinterlegt')}</div>
         </div>
-        <button class="sb-item-action" style="background: #7c3aed;">⚡ Bereit</button>
+        <button class="sb-item-action" style="background: #7c3aed;">${actionLabel}</button>
       `;
 
       row.addEventListener("click", (e) => {
@@ -1549,12 +1602,16 @@ if (!isSentinelBitVaultPage) {
 
 let activeWebAuthnGetResolver = null;
 
-function promptPasskeyAssertion(passkey, rpId, callback) {
+function promptPasskeyAssertion(passkeys, rpId, callback) {
   ensureOverlayContainer();
   if (!shadowRoot) {
-    callback(true);
+    const list = Array.isArray(passkeys) ? passkeys : [passkeys];
+    callback(true, list[0]);
     return;
   }
+
+  const passkeyList = Array.isArray(passkeys) ? passkeys : [passkeys];
+  let selectedPasskey = passkeyList[0];
 
   const modal = shadowRoot.getElementById("sb-passkey-modal");
   const title = shadowRoot.getElementById("sb-pk-modal-title");
@@ -1562,20 +1619,63 @@ function promptPasskeyAssertion(passkey, rpId, callback) {
   const text = shadowRoot.getElementById("sb-pk-modal-text");
   const user = shadowRoot.getElementById("sb-pk-modal-user");
   const rp = shadowRoot.getElementById("sb-pk-modal-rp");
+  const accountsContainer = shadowRoot.getElementById("sb-pk-modal-accounts");
   const btnConfirm = shadowRoot.getElementById("sb-pk-modal-confirm");
   const btnCancel = shadowRoot.getElementById("sb-pk-modal-cancel");
 
   if (!modal || !btnConfirm || !btnCancel) {
-    callback(true);
+    callback(true, selectedPasskey);
     return;
   }
 
   title.innerText = "sentinelbit Passkey";
   badge.innerText = "FIDO2";
-  text.innerText = "Mit Passkey anmelden:";
-  user.innerText = passkey.username || "Hinterlegter Benutzer";
   rp.innerText = rpId;
   btnConfirm.innerText = "⚡ Anmelden";
+
+  if (passkeyList.length > 1) {
+    text.innerText = "Wähle einen Account für die Anmeldung:";
+    if (user) user.style.display = "none";
+    if (accountsContainer) {
+      accountsContainer.style.display = "flex";
+      accountsContainer.innerHTML = "";
+
+      passkeyList.forEach((pk, index) => {
+        const card = document.createElement("div");
+        card.className = "sb-modal-account-card" + (index === 0 ? " selected" : "");
+        card.innerHTML = `
+          <div class="sb-modal-account-info">
+            <span class="sb-modal-account-user">${escapeHtml(pk.username || 'Benutzer ' + (index + 1))}</span>
+            <span class="sb-modal-account-desc">${escapeHtml(pk.rp_name || rpId)}</span>
+          </div>
+          <span class="sb-modal-account-check">${index === 0 ? "✓" : ""}</span>
+        `;
+        card.onclick = () => {
+          selectedPasskey = pk;
+          const allCards = accountsContainer.querySelectorAll(".sb-modal-account-card");
+          allCards.forEach(c => {
+            c.classList.remove("selected");
+            const chk = c.querySelector(".sb-modal-account-check");
+            if (chk) chk.innerText = "";
+          });
+          card.classList.add("selected");
+          const chk = card.querySelector(".sb-modal-account-check");
+          if (chk) chk.innerText = "✓";
+        };
+        accountsContainer.appendChild(card);
+      });
+    }
+  } else {
+    text.innerText = "Mit Passkey anmelden:";
+    if (accountsContainer) {
+      accountsContainer.style.display = "none";
+      accountsContainer.innerHTML = "";
+    }
+    if (user) {
+      user.style.display = "block";
+      user.innerText = (selectedPasskey && selectedPasskey.username) ? selectedPasskey.username : "Hinterlegter Benutzer";
+    }
+  }
 
   modal.classList.add("open");
 
@@ -1587,12 +1687,12 @@ function promptPasskeyAssertion(passkey, rpId, callback) {
 
   btnConfirm.onclick = () => {
     cleanup();
-    callback(true);
+    callback(true, selectedPasskey);
   };
 
   btnCancel.onclick = () => {
     cleanup();
-    callback(false);
+    callback(false, null);
   };
 }
 
@@ -1609,6 +1709,7 @@ function promptPasskeyCreation(rpName, rpId, username, callback) {
   const text = shadowRoot.getElementById("sb-pk-modal-text");
   const user = shadowRoot.getElementById("sb-pk-modal-user");
   const rp = shadowRoot.getElementById("sb-pk-modal-rp");
+  const accountsContainer = shadowRoot.getElementById("sb-pk-modal-accounts");
   const btnConfirm = shadowRoot.getElementById("sb-pk-modal-confirm");
   const btnCancel = shadowRoot.getElementById("sb-pk-modal-cancel");
 
@@ -1620,7 +1721,14 @@ function promptPasskeyCreation(rpName, rpId, username, callback) {
   title.innerText = "Passkey erstellen";
   badge.innerText = "NEU";
   text.innerText = `Neuen Passkey für ${rpName} in Sentinelbit speichern?`;
-  user.innerText = username || "Account";
+  if (accountsContainer) {
+    accountsContainer.style.display = "none";
+    accountsContainer.innerHTML = "";
+  }
+  if (user) {
+    user.style.display = "block";
+    user.innerText = username || "Account";
+  }
   rp.innerText = rpId;
   btnConfirm.innerText = "🔑 Im Tresor speichern";
 
@@ -1668,13 +1776,18 @@ async function handleWebAuthnGetRequest(requestId, options) {
       return;
     }
 
-    const passkey = response.passkeys[0];
-
     // Conditional UI (autofill mediation)
     if (mediation === "conditional") {
+      activeMatchingPasskeys = response.passkeys;
+      ensureOverlayContainer();
+      attachFieldListeners();
+
       activeWebAuthnGetResolver = async (selectedPk) => {
         try {
-          const assertion = await signWebAuthnAssertion(selectedPk || passkey, rpId, challenge);
+          const targetPk = selectedPk || response.passkeys[0];
+          console.log("[sentinelbit] Conditional UI resolver triggered for passkey:", targetPk);
+          const assertion = await signWebAuthnAssertion(targetPk, rpId, challenge);
+          showInPageNotification(`✓ Mit Passkey (${targetPk.username || rpId}) angemeldet!`, "⚡");
           window.postMessage({
             source: "SENTINELBIT_CONTENT_WEBAUTHN",
             requestId,
@@ -1682,6 +1795,7 @@ async function handleWebAuthnGetRequest(requestId, options) {
             data: assertion
           }, "*");
         } catch (e) {
+          console.error("[sentinelbit] Conditional UI assertion error:", e);
           window.postMessage({
             source: "SENTINELBIT_CONTENT_WEBAUTHN",
             requestId,
@@ -1689,11 +1803,18 @@ async function handleWebAuthnGetRequest(requestId, options) {
           }, "*");
         }
       };
+
+      // If an input is already focused, show the autofill trigger / open dropdown with passkeys!
+      if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement === activeTargetInput)) {
+        positionTriggerOnInput(document.activeElement);
+        openDropdown();
+      }
       return;
     }
 
-    promptPasskeyAssertion(passkey, rpId, async (approved) => {
-      if (!approved) {
+    promptPasskeyAssertion(response.passkeys, rpId, async (approved, selectedPasskey) => {
+      const passkey = selectedPasskey || response.passkeys[0];
+      if (!approved || !passkey) {
         window.postMessage({
           source: "SENTINELBIT_CONTENT_WEBAUTHN",
           requestId,
