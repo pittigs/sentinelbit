@@ -246,3 +246,72 @@ func TestAuthAndVaultLifecycle(t *testing.T) {
 		t.Fatalf("Expected 401 Unauthorized after logout, got %d", rr.Code)
 	}
 }
+
+func TestPrometheusMetricsAndSecureSend(t *testing.T) {
+	database, tempDir := setupTestDB(t)
+	defer database.Close()
+	defer os.RemoveAll(tempDir)
+
+	cfg := &config.Config{Host: "127.0.0.1", Port: "8000"}
+	api.InitAPI(cfg, database)
+	router := api.SetupRouter(database, cfg)
+
+	// 1. Test /metrics
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /metrics, got %d", rr.Code)
+	}
+	metricsBody := rr.Body.String()
+	if !bytes.Contains([]byte(metricsBody), []byte("sentinelbit_build_info")) || !bytes.Contains([]byte(metricsBody), []byte("sentinelbit_goroutines")) {
+		t.Fatalf("Expected Prometheus metrics output, got: %s", metricsBody)
+	}
+
+	// 2. Test Secure Send Creation (Burn limit 1)
+	sendReq := models.SecureSendCreateRequest{
+		EncryptedPayload: "SECRET_PAYLOAD_CIPHERTEXT",
+		BurnLimit:        1,
+		ExpireHours:      24,
+	}
+	sendPayloadBytes, _ := json.Marshal(sendReq)
+	req = httptest.NewRequest(http.MethodPost, "/api/send", bytes.NewReader(sendPayloadBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created for /api/send, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	var sendRes models.SecureSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &sendRes); err != nil || sendRes.ID == "" {
+		t.Fatalf("Failed to parse SecureSend response: %v", err)
+	}
+
+	// 3. Test Secure Send Retrieval (First read - burns immediately on limit 1)
+	req = httptest.NewRequest(http.MethodGet, "/api/send/"+sendRes.ID, nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for reading SecureSend, got %d", rr.Code)
+	}
+
+	var retrieveRes models.SecureSendRetrieveResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &retrieveRes)
+	if retrieveRes.EncryptedPayload != "SECRET_PAYLOAD_CIPHERTEXT" {
+		t.Fatalf("Expected payload 'SECRET_PAYLOAD_CIPHERTEXT', got '%s'", retrieveRes.EncryptedPayload)
+	}
+
+	// 4. Test Secure Send Second Read (Should be burned / 404)
+	req = httptest.NewRequest(http.MethodGet, "/api/send/"+sendRes.ID, nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("Expected 404 NotFound after burn limit hit, got %d", rr.Code)
+	}
+}
+

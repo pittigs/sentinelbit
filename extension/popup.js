@@ -131,6 +131,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupGenerator();
   setupHeaderButtons();
   setupLoginForm();
+  setupPinUnlock();
+  setupKeyboardNavigation();
   setupSettings();
 
   await checkServerHealth();
@@ -303,6 +305,22 @@ async function loadCachedVault() {
     if (lockBtn) lockBtn.style.display = "none";
     syncInfo.innerText = "Nicht verbunden / Gesperrt";
 
+    const pinData = await new Promise(r => chrome.storage.local.get(["pin_hash", "pin_encrypted_vault"], r));
+    const pinBox = document.getElementById("popup-pin-box");
+    const loginForm = document.getElementById("popup-login-form");
+    if (pinData && pinData.pin_hash && pinData.pin_encrypted_vault) {
+      if (pinBox) pinBox.style.display = "block";
+      if (loginForm) loginForm.style.display = "none";
+      const pinInput = document.getElementById("popup-pin-input");
+      if (pinInput) {
+        pinInput.value = "";
+        pinInput.focus();
+      }
+    } else {
+      if (pinBox) pinBox.style.display = "none";
+      if (loginForm) loginForm.style.display = "block";
+    }
+
     if (meta.vault_user) {
       const userInput = document.getElementById("popup-login-user");
       if (userInput && !userInput.value) userInput.value = meta.vault_user;
@@ -422,28 +440,57 @@ function renderItems() {
     const card = document.createElement("div");
     card.className = "item-card";
 
-    card.innerHTML = `
-      <div class="item-header">
-        <div class="item-title" title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</div>
-        ${it.favorite ? '<span style="color: #fbbf24; font-size: 11px;">⭐</span>' : ''}
-      </div>
-      <div class="item-user" title="${escapeHtml(it.username || '')}">
-        ${escapeHtml(it.username || 'Kein Benutzername')}
-      </div>
-      <div class="actions">
-        <button class="btn btn-autofill">⚡ Ausfüllen</button>
-        <button class="btn btn-secondary btn-copy-pwd" title="Passwort kopieren">🔑</button>
-        ${it.totp ? '<button class="btn btn-secondary btn-totp" title="2FA Code kopieren">⏱️ 2FA</button>' : ''}
-      </div>
-    `;
+    if (it.type === "card") {
+      const cardNum = it.cardNumber || (it.data && it.data.cardNumber) || "";
+      const last4 = cardNum.replace(/\s+/g, "").slice(-4);
+      card.innerHTML = `
+        <div class="item-header">
+          <div class="item-title" title="${escapeHtml(it.title)}">💳 ${escapeHtml(it.title)}</div>
+          ${it.favorite ? '<span style="color: #fbbf24; font-size: 11px;">⭐</span>' : ''}
+        </div>
+        <div class="item-user" title="${escapeHtml(cardNum)}">
+          •••• •••• •••• ${last4 || 'Karte'}
+        </div>
+        <div class="actions">
+          <button class="btn btn-autofill btn-fill-card">💳 Ausfüllen</button>
+          <button class="btn btn-secondary btn-copy-card" title="Kartennummer kopieren">📋</button>
+          <button class="btn btn-secondary btn-copy-cvv" title="CVV kopieren">🔒</button>
+        </div>
+      `;
+      card.querySelector(".btn-fill-card").onclick = () => executeCardAutofill(it.data || it);
+      card.querySelector(".btn-copy-card").onclick = () => copyText(cardNum, "Kartennummer kopiert! ✓");
+      card.querySelector(".btn-copy-cvv").onclick = () => copyText(it.cvv || (it.data && it.data.cvv) || "", "CVV kopiert! ✓", true);
+    } else {
+      card.innerHTML = `
+        <div class="item-header">
+          <div class="item-title" title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</div>
+          ${it.favorite ? '<span style="color: #fbbf24; font-size: 11px;">⭐</span>' : ''}
+        </div>
+        <div class="item-user" title="${escapeHtml(it.username || '')}">
+          <span draggable="true" class="drag-badge" data-drag="${escapeHtml(it.username || '')}" title="Ziehen zum Einfügen" style="cursor: grab;">👤 ${escapeHtml(it.username || 'Kein Benutzername')}</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-autofill">⚡ Ausfüllen</button>
+          <button class="btn btn-secondary btn-copy-pwd" draggable="true" data-drag="${escapeHtml(it.password || '')}" title="Passwort kopieren oder direkt ins Feld ziehen" style="cursor: grab;">🔑</button>
+          ${it.totp ? `<button class="btn btn-secondary btn-totp" draggable="true" data-drag="${escapeHtml(it.totp || '')}" title="2FA Code kopieren oder ziehen" style="cursor: grab;">⏱️ 2FA</button>` : ''}
+        </div>
+      `;
 
-    // Action handlers: automatically include TOTP when autofilling
-    card.querySelector(".btn-autofill").onclick = () => executeAutofill(it.username, it.password, it.totp);
-    card.querySelector(".btn-copy-pwd").onclick = () => copyText(it.password, "Passwort kopiert! ✓");
+      card.querySelectorAll("[draggable='true']").forEach(el => {
+        el.addEventListener("dragstart", (e) => {
+          const val = el.getAttribute("data-drag");
+          if (val) e.dataTransfer.setData("text/plain", val);
+        });
+      });
 
-    const totpBtn = card.querySelector(".btn-totp");
-    if (totpBtn) {
-      totpBtn.onclick = () => handleTotpCopy(it.totp);
+      // Action handlers: automatically include TOTP when autofilling
+      card.querySelector(".btn-autofill").onclick = () => executeAutofill(it.username, it.password, it.totp);
+      card.querySelector(".btn-copy-pwd").onclick = () => copyText(it.password, "Passwort kopiert! ✓");
+
+      const totpBtn = card.querySelector(".btn-totp");
+      if (totpBtn) {
+        totpBtn.onclick = () => handleTotpCopy(it.totp);
+      }
     }
 
     listEl.appendChild(card);
@@ -653,6 +700,27 @@ async function loginAndSyncDirectly(username, password, totpCode) {
     console.debug("Could not fetch passkeys:", pkErr);
   }
 
+  // Step 4c: Decrypt Passkeys (support Sentinelbit AES-GCM envelope & Vaultwarden/Bitwarden raw keys)
+  for (const pk of passkeys) {
+    let privKey = null;
+    if (pk.encrypted_private_key) {
+      if (typeof pk.encrypted_private_key === "string" && pk.encrypted_private_key.startsWith("{") && pk.encrypted_private_key.includes('"iv"')) {
+        try {
+          const dec = await decryptPayload(pk.encrypted_private_key, encKey);
+          if (dec) {
+            privKey = dec.private_pem || dec.raw_key || (typeof dec === "string" ? dec : null);
+          }
+        } catch (e) {
+          console.debug("Could not decrypt passkey envelope:", e);
+        }
+      } else {
+        // Vaultwarden / Bitwarden raw key string
+        privKey = pk.encrypted_private_key;
+      }
+    }
+    pk.decrypted_private_key = privKey;
+  }
+
   // Step 5: Decrypt Logins
   const logins = [];
   for (const it of rawItems) {
@@ -680,7 +748,8 @@ async function loginAndSyncDirectly(username, password, totpCode) {
   if (chrome.storage.session) {
     await chrome.storage.session.set({
       vault_cache: logins,
-      vault_passkeys: passkeys
+      vault_passkeys: passkeys,
+      vault_token: verifyData.token
     });
   }
   // Store only non-sensitive metadata in persistent local storage
@@ -770,6 +839,57 @@ function processAutofillResult(res) {
   } else {
     const msg = (res && res.message) ? res.message : "Kein Anmeldefeld auf der Seite gefunden.";
     showToast("⚠️ " + msg + " (Nutze '🔑')", "error");
+  }
+}
+
+async function executeCardAutofill(cardData) {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0] || !tabs[0].id) {
+      showToast("Kein aktiver Tab gefunden", "error");
+      return;
+    }
+    const tabId = tabs[0].id;
+    const tabUrl = tabs[0].url || "";
+
+    if (tabUrl.startsWith("chrome://") || tabUrl.startsWith("edge://") || tabUrl.startsWith("about:") || tabUrl.startsWith("chrome-extension://")) {
+      showToast("Auf Browser-Systemseiten nicht möglich.", "error");
+      return;
+    }
+
+    chrome.tabs.sendMessage(tabId, { action: "AUTOFILL_CARD", card: cardData }, async (res) => {
+      if (chrome.runtime.lastError || !res) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tabId, allFrames: true },
+            files: ["content.js"]
+          });
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, { action: "AUTOFILL_CARD", card: cardData }, (retryRes) => {
+              if (retryRes && retryRes.status === "ok") {
+                showToast("✓ Kartendaten ausgefüllt!");
+                setTimeout(() => window.close(), 450);
+              } else {
+                showToast("⚠️ " + (retryRes ? retryRes.message : "Keine Kreditkartenfelder gefunden"), "error");
+              }
+            });
+          }, 150);
+          return;
+        } catch (e) {
+          showToast("Konnte Tab nicht ansteuern.", "error");
+          return;
+        }
+      }
+
+      if (res && res.status === "ok") {
+        showToast("✓ Kartendaten ausgefüllt!");
+        setTimeout(() => window.close(), 450);
+      } else {
+        showToast("⚠️ " + (res ? res.message : "Keine Kreditkartenfelder gefunden"), "error");
+      }
+    });
+  } catch (err) {
+    showToast("Fehler beim Ausfüllen: " + err.message, "error");
   }
 }
 
@@ -899,6 +1019,14 @@ function setupHeaderButtons() {
   const syncBtn = document.getElementById("btn-sync");
   const lockBtn = document.getElementById("btn-lock");
   const settingsBtn = document.getElementById("btn-settings");
+  const sidepanelBtn = document.getElementById("btn-sidepanel");
+
+  if (sidepanelBtn) {
+    sidepanelBtn.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ action: "OPEN_SIDEPANEL" }, () => {});
+      window.close();
+    });
+  }
 
   if (syncBtn) {
     syncBtn.addEventListener("click", async () => {
@@ -924,9 +1052,17 @@ function setupHeaderButtons() {
       settingsView.style.display = isOpen ? "none" : "block";
       if (!isOpen) {
         document.getElementById("setting-server-url").value = SERVER_URL;
-        chrome.storage.local.get(["auto_lock_minutes"], (res) => {
-          if (res && res.auto_lock_minutes !== undefined) {
-            document.getElementById("setting-autolock").value = String(res.auto_lock_minutes);
+        chrome.storage.local.get(["auto_lock_minutes", "clipboard_clear_seconds", "auto_submit", "excluded_domains", "pin_hash"], (res) => {
+          if (res) {
+            if (res.auto_lock_minutes !== undefined) document.getElementById("setting-autolock").value = String(res.auto_lock_minutes);
+            if (res.clipboard_clear_seconds !== undefined) document.getElementById("setting-clipboard-clear").value = String(res.clipboard_clear_seconds);
+            if (res.auto_submit !== undefined) document.getElementById("setting-auto-submit").checked = Boolean(res.auto_submit);
+            if (res.excluded_domains) document.getElementById("setting-excluded-domains").value = res.excluded_domains;
+            const pinInput = document.getElementById("setting-pin-code");
+            if (pinInput) {
+              pinInput.value = "";
+              pinInput.placeholder = res.pin_hash ? "PIN aktiv (leer lassen = behalten)" : "PIN leer lassen zum Deaktivieren";
+            }
           }
         });
       }
@@ -981,12 +1117,31 @@ function setupSettings() {
       let inputUrl = (document.getElementById("setting-server-url").value || "").trim().replace(/\/+$/, "");
       if (!inputUrl) inputUrl = "http://127.0.0.1:8000";
       const autolockVal = parseInt(document.getElementById("setting-autolock").value || "15", 10);
+      const clipClearVal = parseInt(document.getElementById("setting-clipboard-clear")?.value || "30", 10);
+      const autoSubmitVal = document.getElementById("setting-auto-submit")?.checked || false;
+      const excludedVal = document.getElementById("setting-excluded-domains")?.value || "";
+      const pinCodeVal = (document.getElementById("setting-pin-code")?.value || "").trim();
 
       SERVER_URL = inputUrl;
-      await new Promise(r => chrome.storage.local.set({
+      const toSave = {
         server_url: inputUrl,
-        auto_lock_minutes: autolockVal
-      }, r));
+        auto_lock_minutes: autolockVal,
+        clipboard_clear_seconds: clipClearVal,
+        auto_submit: autoSubmitVal,
+        excluded_domains: excludedVal
+      };
+
+      if (pinCodeVal.length >= 4) {
+        const pinH = await sha256Hex(pinCodeVal);
+        toSave.pin_hash = pinH;
+        if (allVaultItems.length > 0 || allVaultPasskeys.length > 0) {
+          const pinKey = await deriveKeyFromPin(pinCodeVal);
+          const encVault = await encryptPayload({ logins: allVaultItems, passkeys: allVaultPasskeys }, pinKey);
+          toSave.pin_encrypted_vault = encVault;
+        }
+      }
+
+      await new Promise(r => chrome.storage.local.set(toSave, r));
 
       const footerLink = document.getElementById("footer-vault-link");
       if (footerLink) footerLink.href = SERVER_URL;
@@ -1021,24 +1176,75 @@ async function triggerOpenAndSyncVault() {
 }
 
 // =============================================================
-// 10. IN-POPUP PASSWORD GENERATOR
+// 10. IN-POPUP PASSWORD & PASSPHRASE GENERATOR
 // =============================================================
+
+const DICEWARE_WORDS = [
+  "alpen", "adler", "anker", "apfel", "atom", "bahn", "baum", "berg", "blitz", "blume",
+  "boot", "bruecke", "burg", "campus", "chaos", "dachs", "diamant", "drache", "duene", "echo",
+  "eule", "falke", "feuer", "fluss", "forst", "fuchs", "funke", "garten", "gipfel", "glanz",
+  "gold", "hafen", "insel", "jagd", "juwel", "komet", "kristall", "kupfer", "laser", "licht",
+  "loewe", "luchs", "magie", "matrix", "mond", "moos", "nacht", "nebel", "nord", "oase",
+  "ozean", "palast", "panther", "perle", "pfeil", "planet", "prisma", "quelle", "quarz", "rakete",
+  "regen", "ritter", "rubin", "smaragd", "sonne", "spiegel", "sturm", "tann", "tiger", "titan",
+  "traum", "turm", "urwald", "vulkan", "wald", "welle", "wind", "wolf", "zenit", "aurora",
+  "biber", "dynamik", "element", "galaxie", "horizont", "impuls", "jubel", "kosmos", "meteor",
+  "nexus", "orbit", "pulsar", "quantum", "reaktor", "signal", "tempo", "uranus", "vektor", "wirbel",
+  "xenon", "antrieb", "chronos", "pegasus", "sirius", "helena", "komet", "saturn", "polaris"
+];
+
+let generatorMode = "pwd";
 
 function setupGenerator() {
   const slider = document.getElementById("gen-len-slider");
   const lenVal = document.getElementById("gen-len-val");
+  const wordsSlider = document.getElementById("gen-words-slider");
+  const wordsVal = document.getElementById("gen-words-val");
   const btnRefresh = document.getElementById("btn-gen-refresh");
   const btnCopy = document.getElementById("btn-gen-copy");
   const btnAutofill = document.getElementById("btn-gen-autofill");
+  const btnModePwd = document.getElementById("btn-gen-mode-pwd");
+  const btnModePass = document.getElementById("btn-gen-mode-passphrase");
+  const rowLen = document.getElementById("row-gen-len");
+  const rowWords = document.getElementById("row-gen-words");
+  const charOptions = document.getElementById("gen-char-options");
 
-  if (!slider) return;
+  if (btnModePwd && btnModePass) {
+    btnModePwd.onclick = () => {
+      generatorMode = "pwd";
+      btnModePwd.classList.add("active");
+      btnModePass.classList.remove("active");
+      if (rowLen) rowLen.style.display = "flex";
+      if (rowWords) rowWords.style.display = "none";
+      if (charOptions) charOptions.style.display = "grid";
+      generateNewPassword();
+    };
+    btnModePass.onclick = () => {
+      generatorMode = "passphrase";
+      btnModePass.classList.add("active");
+      btnModePwd.classList.remove("active");
+      if (rowLen) rowLen.style.display = "none";
+      if (rowWords) rowWords.style.display = "flex";
+      if (charOptions) charOptions.style.display = "none";
+      generateNewPassword();
+    };
+  }
 
-  slider.addEventListener("input", () => {
-    lenVal.innerText = slider.value;
-    generateNewPassword();
-  });
+  if (slider) {
+    slider.addEventListener("input", () => {
+      if (lenVal) lenVal.innerText = slider.value;
+      generateNewPassword();
+    });
+  }
 
-  ["gen-opt-upper", "gen-opt-lower", "gen-opt-numbers", "gen-opt-symbols"].forEach(id => {
+  if (wordsSlider) {
+    wordsSlider.addEventListener("input", () => {
+      if (wordsVal) wordsVal.innerText = wordsSlider.value;
+      generateNewPassword();
+    });
+  }
+
+  ["gen-opt-upper", "gen-opt-lower", "gen-opt-numbers", "gen-opt-symbols", "gen-opt-ambiguous"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", generateNewPassword);
   });
@@ -1055,35 +1261,254 @@ function setupGenerator() {
 }
 
 function generateNewPassword() {
-  const len = parseInt(document.getElementById("gen-len-slider")?.value || "20", 10);
-  const up = document.getElementById("gen-opt-upper")?.checked ?? true;
-  const low = document.getElementById("gen-opt-lower")?.checked ?? true;
-  const num = document.getElementById("gen-opt-numbers")?.checked ?? true;
-  const sym = document.getElementById("gen-opt-symbols")?.checked ?? true;
-
-  let chars = "";
-  if (up) chars += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  if (low) chars += "abcdefghijklmnopqrstuvwxyz";
-  if (num) chars += "0123456789";
-  if (sym) chars += "!@#$%^&*()_+-=[]{}|;:,.<>?";
-
-  if (!chars) chars = "abcdefghijklmnopqrstuvwxyz";
-
-  const randomValues = new Uint32Array(len);
-  window.crypto.getRandomValues(randomValues);
-
   let pwd = "";
-  for (let i = 0; i < len; i++) {
-    pwd += chars[randomValues[i] % chars.length];
+  let entropy = 0;
+
+  if (generatorMode === "passphrase") {
+    const wordCount = parseInt(document.getElementById("gen-words-slider")?.value || "4", 10);
+    const randVals = new Uint32Array(wordCount);
+    window.crypto.getRandomValues(randVals);
+    const words = [];
+    for (let i = 0; i < wordCount; i++) {
+      let w = DICEWARE_WORDS[randVals[i] % DICEWARE_WORDS.length];
+      if (i === 0) w = w.charAt(0).toUpperCase() + w.slice(1);
+      words.push(w);
+    }
+    const randNum = (randVals[0] % 8) + 2;
+    pwd = words.join("-") + "-" + randNum;
+    entropy = Math.round(wordCount * Math.log2(DICEWARE_WORDS.length) + Math.log2(8));
+  } else {
+    const len = parseInt(document.getElementById("gen-len-slider")?.value || "20", 10);
+    const up = document.getElementById("gen-opt-upper")?.checked ?? true;
+    const low = document.getElementById("gen-opt-lower")?.checked ?? true;
+    const num = document.getElementById("gen-opt-numbers")?.checked ?? true;
+    const sym = document.getElementById("gen-opt-symbols")?.checked ?? true;
+    const avoidAmbiguous = document.getElementById("gen-opt-ambiguous")?.checked ?? false;
+
+    let chars = "";
+    if (up) chars += avoidAmbiguous ? "ABCDEFGHJKLMNPQRSTUVWXYZ" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    if (low) chars += avoidAmbiguous ? "abcdefghijkmnopqrstuvwxyz" : "abcdefghijklmnopqrstuvwxyz";
+    if (num) chars += avoidAmbiguous ? "23456789" : "0123456789";
+    if (sym) chars += "!@#$%^&*()_+-=[]{}|;:,.<>?";
+
+    if (!chars) chars = "abcdefghijkmnopqrstuvwxyz";
+
+    const randomValues = new Uint32Array(len);
+    window.crypto.getRandomValues(randomValues);
+
+    for (let i = 0; i < len; i++) {
+      pwd += chars[randomValues[i] % chars.length];
+    }
+    entropy = Math.round(len * Math.log2(chars.length));
   }
 
   currentGeneratedPassword = pwd;
   const out = document.getElementById("gen-pwd-output");
   if (out) out.innerText = pwd;
+
+  // Update entropy UI
+  const bar = document.getElementById("gen-entropy-bar");
+  const text = document.getElementById("gen-entropy-text");
+  if (bar && text) {
+    let color = "#ef4444";
+    let label = "Schwach 🔴";
+    let pct = Math.min(100, Math.round((entropy / 128) * 100));
+
+    if (entropy >= 100) {
+      color = "#10b981";
+      label = "Quantensicher / Exzellent 🟢";
+    } else if (entropy >= 75) {
+      color = "#3b82f6";
+      label = "Sehr sicher 🔵";
+    } else if (entropy >= 50) {
+      color = "#f59e0b";
+      label = "Solide 🟡";
+    }
+
+    bar.style.width = `${pct}%`;
+    bar.style.background = color;
+    text.innerText = `~${entropy} Bits Entropie (${label})`;
+    text.style.color = color;
+  }
 }
 
 // =============================================================
-// 11. UI HELPERS
+// 11. KEYBOARD NAVIGATION & PIN UNLOCK
+// =============================================================
+
+let selectedItemIndex = -1;
+
+function setupKeyboardNavigation() {
+  const searchInput = document.getElementById("ext-search");
+  if (!searchInput) return;
+
+  searchInput.addEventListener("keydown", (e) => {
+    const listEl = document.getElementById("items-list");
+    const cards = listEl ? Array.from(listEl.querySelectorAll(".item-card")) : [];
+    if (cards.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      selectedItemIndex = (selectedItemIndex + 1) % cards.length;
+      updateCardHighlight(cards);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      selectedItemIndex = (selectedItemIndex - 1 + cards.length) % cards.length;
+      updateCardHighlight(cards);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (selectedItemIndex >= 0 && selectedItemIndex < cards.length) {
+        const fillBtn = cards[selectedItemIndex].querySelector(".btn-autofill");
+        if (fillBtn) fillBtn.click();
+      } else if (cards.length > 0) {
+        const fillBtn = cards[0].querySelector(".btn-autofill");
+        if (fillBtn) fillBtn.click();
+      }
+    }
+  });
+}
+
+function updateCardHighlight(cards) {
+  cards.forEach((c, idx) => {
+    if (idx === selectedItemIndex) {
+      c.style.borderColor = "#3b82f6";
+      c.style.background = "#1e293b";
+      c.style.boxShadow = "0 0 8px rgba(59, 130, 246, 0.4)";
+      c.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else {
+      c.style.borderColor = "";
+      c.style.background = "";
+      c.style.boxShadow = "";
+    }
+  });
+}
+
+function setupPinUnlock() {
+  const pinBtn = document.getElementById("btn-popup-pin-unlock");
+  const pinInput = document.getElementById("popup-pin-input");
+  const linkFull = document.getElementById("link-show-full-login");
+
+  if (pinBtn && pinInput) {
+    const doPinUnlock = () => {
+      const pin = pinInput.value.trim();
+      if (pin) unlockWithPin(pin);
+    };
+    pinBtn.addEventListener("click", doPinUnlock);
+    pinInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doPinUnlock();
+    });
+  }
+
+  const bioBtn = document.getElementById("btn-popup-bio-unlock");
+  if (bioBtn) {
+    bioBtn.addEventListener("click", async () => {
+      try {
+        const cred = await navigator.credentials.get({
+          publicKey: {
+            challenge: window.crypto.getRandomValues(new Uint8Array(32)),
+            timeout: 60000,
+            userVerification: "required"
+          }
+        });
+        if (cred) {
+          showToast("Biometrie verifiziert! 🔓", "success");
+        }
+      } catch (err) {
+        showToast("Biometrische Prüfung abgebrochen oder nicht verfügbar.", "warning");
+      }
+    });
+  }
+
+  if (linkFull) {
+    linkFull.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.getElementById("popup-pin-box").style.display = "none";
+      document.getElementById("popup-login-form").style.display = "block";
+    });
+  }
+}
+
+async function unlockWithPin(pin) {
+  const pinData = await new Promise(r => chrome.storage.local.get(["pin_hash", "pin_encrypted_vault"], r));
+  if (!pinData || !pinData.pin_hash || !pinData.pin_encrypted_vault) {
+    showToast("Kein PIN eingerichtet", "error");
+    return;
+  }
+  const enteredHash = await sha256Hex(pin);
+  if (enteredHash !== pinData.pin_hash) {
+    showToast("Falscher PIN-Code ❌", "error");
+    return;
+  }
+
+  try {
+    const pinKey = await deriveKeyFromPin(pin);
+    const decrypted = await decryptPayload(pinData.pin_encrypted_vault, pinKey);
+    if (!decrypted) throw new Error("Entschlüsselung fehlgeschlagen");
+
+    const logins = decrypted.logins || [];
+    const passkeys = decrypted.passkeys || [];
+
+    if (chrome.storage.session) {
+      await chrome.storage.session.set({
+        vault_cache: logins,
+        vault_passkeys: passkeys
+      });
+    }
+
+    allVaultItems = logins;
+    allVaultPasskeys = passkeys;
+    chrome.runtime.sendMessage({ action: "VAULT_UNLOCKED" }, () => {});
+    await loadCachedVault();
+    showToast(`Mit PIN entsperrt! 🔓 (${logins.length} Logins)`);
+  } catch (e) {
+    showToast("Fehler beim Entsperren mit PIN", "error");
+  }
+}
+
+async function sha256Hex(str) {
+  const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return bufferToHex(buf);
+}
+
+async function deriveKeyFromPin(pin) {
+  const enc = new TextEncoder();
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    enc.encode(pin),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+  return await window.crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: enc.encode("sentinelbit_pin_fixed_salt_v1"),
+      iterations: 50000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptPayload(dataObj, cryptoKey) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(dataObj));
+  const ciphertext = await window.crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv },
+    cryptoKey,
+    encoded
+  );
+  return {
+    iv: bufferToHex(iv),
+    data: bufferToHex(ciphertext)
+  };
+}
+
+// =============================================================
+// 12. UI HELPERS
 // =============================================================
 
 function setupTabs() {
@@ -1124,6 +1549,12 @@ function copyText(txt, msg = "In Zwischenablage kopiert! ✓") {
   if (!txt) return;
   navigator.clipboard.writeText(txt).then(() => {
     showToast(msg);
+    chrome.storage.local.get(["clipboard_clear_seconds"], (res) => {
+      const sec = parseInt(res.clipboard_clear_seconds ?? "30", 10);
+      if (sec > 0) {
+        chrome.runtime.sendMessage({ action: "SCHEDULE_CLIPBOARD_CLEAR", seconds: sec }, () => {});
+      }
+    });
   });
 }
 
@@ -1141,3 +1572,4 @@ function escapeHtml(str) {
   if (!str) return "";
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+

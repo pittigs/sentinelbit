@@ -6,6 +6,27 @@
  */
 
 // =============================================================
+// 0. WEBAUTHN / FIDO2 ENGINE INJECTION & LISTENER
+// =============================================================
+
+try {
+  const scriptTag = document.createElement("script");
+  scriptTag.src = chrome.runtime.getURL("webauthn-page.js");
+  scriptTag.onload = () => scriptTag.remove();
+  (document.head || document.documentElement).appendChild(scriptTag);
+} catch (e) {}
+
+window.addEventListener("message", async (event) => {
+  if (event.source !== window || !event.data || event.data.source !== "SENTINELBIT_PAGE_WEBAUTHN") return;
+  const { type, requestId, options } = event.data;
+  if (type === "GET_REQUEST") {
+    handleWebAuthnGetRequest(requestId, options);
+  } else if (type === "CREATE_REQUEST") {
+    handleWebAuthnCreateRequest(requestId, options);
+  }
+});
+
+// =============================================================
 // 1. EXTENSION TO WEBPAGE SYNC BRIDGE (http://127.0.0.1:8000)
 // =============================================================
 
@@ -77,9 +98,18 @@ if (isSentinelBitVaultPage) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "AUTOFILL") {
-    executeAutofill(request.username, request.password, request.totp, request.passkey).then(result => {
+    executeAutofill(request.username, request.password, request.totp, request.passkey, request.customFields).then(result => {
       sendResponse(result);
     });
+    return true;
+  } else if (request.action === "AUTOFILL_CARD") {
+    executeCardAutofill(request.card).then(result => {
+      sendResponse(result);
+    });
+    return true;
+  } else if (request.action === "GENERATE_EMAIL_ALIAS") {
+    const alias = generateEmailAlias(request.baseEmail, window.location.hostname);
+    sendResponse({ alias });
     return true;
   } else if (request.action === "TRIGGER_VAULT_PAGE_SYNC") {
     if (isSentinelBitVaultPage) {
@@ -94,6 +124,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "VAULT_CACHE_UPDATED") {
     initInPageAutofill();
     sendResponse({ status: "ok" });
+  } else if (request.action === "CLEAR_CLIPBOARD") {
+    try {
+      navigator.clipboard.writeText("").catch(() => {});
+    } catch (e) {}
+    sendResponse({ status: "cleared" });
   }
   return true;
 });
@@ -380,11 +415,25 @@ function fillOtpInputs(totpCode, allInputs) {
 
 let lastAutofilledSession = null;
 
-// =============================================================
-// 6. INTELLIGENT LOGIN & OTP FORM PAIRING & AUTOFILL
-// =============================================================
+// Drag-and-Drop Autofill Fallback (#15)
+document.addEventListener("drop", (e) => {
+  const target = e.target;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+    const text = e.dataTransfer ? e.dataTransfer.getData("text/plain") : "";
+    if (text) {
+      setInputValue(target, text);
+      showInPageNotification("Eingefügt via Drag & Drop ✓", "🛡️");
+    }
+  }
+}, true);
 
-async function executeAutofill(username, password, totp = "", passkey = null) {
+async function executeAutofill(username, password, totp = "", passkey = null, customFields = null) {
+  // Anti-Phishing & Punycode Check
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname.startsWith("xn--") || /[^\u0000-\u007F]/.test(hostname)) {
+    showInPageNotification("⚠️ Achtung: Internationalisierte Punycode-Domain erkannt. Mögliches Phishing!", "🛡️");
+  }
+
   const allInputs = getAllInputs(document).filter(isElementFillable);
 
   // 1. If passkey provided:
@@ -392,6 +441,17 @@ async function executeAutofill(username, password, totp = "", passkey = null) {
     if (username) {
       const candidateUser = findStandaloneUsernameInput(allInputs);
       if (candidateUser) setInputValue(candidateUser, username);
+    }
+    if (activeWebAuthnGetResolver) {
+      const resolver = activeWebAuthnGetResolver;
+      activeWebAuthnGetResolver = null;
+      resolver(passkey);
+      showInPageNotification(`⚡ Passkey (FIDO2) signiert für ${passkey.username || passkey.rp_name || 'Account'}!`, "⚡");
+      return {
+        status: "ok",
+        passkeyReady: true,
+        message: `Passkey für ${passkey.username || passkey.rp_name} signiert.`
+      };
     }
     showInPageNotification(`⚡ Passkey (FIDO2) aktiv für ${passkey.username || passkey.rp_name || 'Account'}!`, "⚡");
     return {
@@ -451,6 +511,38 @@ async function executeAutofill(username, password, totp = "", passkey = null) {
         setInputValue(usernameInput, username);
         usernameFilled = true;
       }
+    }
+
+    // 5. Custom Field Autofill (#6)
+    if (customFields && typeof customFields === "object") {
+      for (const [key, val] of Object.entries(customFields)) {
+        if (!val) continue;
+        const keyLower = key.toLowerCase();
+        const matched = allInputs.find(inp => {
+          const n = (inp.name || "").toLowerCase();
+          const id = (inp.id || "").toLowerCase();
+          const ph = (inp.placeholder || "").toLowerCase();
+          const customAttr = (inp.getAttribute("data-sentinelbit-field") || "").toLowerCase();
+          return n.includes(keyLower) || id.includes(keyLower) || ph.includes(keyLower) || customAttr === keyLower;
+        });
+        if (matched) {
+          setInputValue(matched, String(val));
+        }
+      }
+    }
+
+    // Auto-Submit if configured
+    if (passwordFilled) {
+      chrome.storage.local.get(["auto_submit"], (res) => {
+        if (res && res.auto_submit) {
+          setTimeout(() => {
+            const form = pwdInput.form || pwdInput.closest("form");
+            if (form) {
+              try { form.requestSubmit(); } catch (e) { form.submit(); }
+            }
+          }, 350);
+        }
+      });
     }
 
     if (otpFilled) {
@@ -516,6 +608,123 @@ async function executeAutofill(username, password, totp = "", passkey = null) {
     passwordFilled: false,
     message: "Kein passendes Anmeldefeld erkannt."
   };
+}
+
+/**
+ * Autofill Credit Card / Payment form fields (#5)
+ */
+async function executeCardAutofill(card) {
+  if (!card) return { status: "no_data", message: "Keine Kartendaten übergeben." };
+
+  const allInputs = getAllInputs(document).filter(isElementFillable);
+  let cardNumFilled = false;
+  let cardHolderFilled = false;
+  let expiryFilled = false;
+  let cvvFilled = false;
+
+  const cardNum = (card.cardNumber || card.number || "").replace(/\s+/g, "");
+  const cardHolder = card.cardholderName || card.cardHolder || card.name || "";
+  const expiry = card.expiry || card.cardExpiry || "";
+  const cvv = card.cvv || card.cardCvv || card.securityCode || "";
+
+  // 1. Credit Card Number field
+  const numInput = allInputs.find(el => {
+    const ac = (el.autocomplete || "").toLowerCase();
+    const name = (el.name || "").toLowerCase();
+    const id = (el.id || "").toLowerCase();
+    const placeholder = (el.placeholder || "").toLowerCase();
+    return ac === "cc-number" ||
+      /(card.*number|cc.*num|pan|kreditkarte|kartennummer)/i.test(name) ||
+      /(card.*number|cc.*num|pan|kreditkarte|kartennummer)/i.test(id) ||
+      /(card.*number|kartennummer)/i.test(placeholder);
+  });
+
+  if (numInput && cardNum) {
+    setInputValue(numInput, cardNum);
+    cardNumFilled = true;
+  }
+
+  // 2. Cardholder Name field
+  const holderInput = allInputs.find(el => {
+    const ac = (el.autocomplete || "").toLowerCase();
+    const name = (el.name || "").toLowerCase();
+    const id = (el.id || "").toLowerCase();
+    const placeholder = (el.placeholder || "").toLowerCase();
+    return ac === "cc-name" ||
+      /(card.*name|cardholder|karteninhaber|name.*on.*card)/i.test(name) ||
+      /(card.*name|cardholder|karteninhaber)/i.test(id) ||
+      /(cardholder|karteninhaber)/i.test(placeholder);
+  });
+
+  if (holderInput && cardHolder) {
+    setInputValue(holderInput, cardHolder);
+    cardHolderFilled = true;
+  }
+
+  // 3. Expiration Date field
+  const expInput = allInputs.find(el => {
+    const ac = (el.autocomplete || "").toLowerCase();
+    const name = (el.name || "").toLowerCase();
+    const id = (el.id || "").toLowerCase();
+    const placeholder = (el.placeholder || "").toLowerCase();
+    return ac === "cc-exp" ||
+      /(cc.*exp|exp.*date|ablaufdatum|gueltig)/i.test(name) ||
+      /(cc.*exp|exp.*date|ablaufdatum|gueltig)/i.test(id) ||
+      /(mm\s*\/\s*yy|mm\s*\/\s*yyyy|ablauf)/i.test(placeholder);
+  });
+
+  if (expInput && expiry) {
+    setInputValue(expInput, expiry);
+    expiryFilled = true;
+  }
+
+  // 4. CVV / CVC field
+  const cvvInput = allInputs.find(el => {
+    const ac = (el.autocomplete || "").toLowerCase();
+    const name = (el.name || "").toLowerCase();
+    const id = (el.id || "").toLowerCase();
+    const placeholder = (el.placeholder || "").toLowerCase();
+    return ac === "cc-csc" ||
+      /(cvv|cvc|csc|security.*code|pruefziffer|sicherheitscode)/i.test(name) ||
+      /(cvv|cvc|csc|security.*code|pruefziffer)/i.test(id) ||
+      /(cvv|cvc|csc|3.*digits)/i.test(placeholder);
+  });
+
+  if (cvvInput && cvv) {
+    setInputValue(cvvInput, cvv);
+    cvvFilled = true;
+  }
+
+  if (cardNumFilled || cardHolderFilled || expiryFilled || cvvFilled) {
+    showInPageNotification("💳 Zahlungskarte erfolgreich ausgefüllt!", "✓");
+    return {
+      status: "ok",
+      cardNumFilled,
+      cardHolderFilled,
+      expiryFilled,
+      cvvFilled,
+      message: "Kartendaten ausgefüllt."
+    };
+  }
+
+  return { status: "not_found", message: "Keine passenden Kreditkartenfelder gefunden." };
+}
+
+/**
+ * Generate a private randomized email mask / alias (#28)
+ */
+function generateEmailAlias(baseEmail, currentDomain) {
+  const rnd = Math.random().toString(36).substring(2, 6);
+  const cleanDomain = (currentDomain || window.location.hostname || "web")
+    .replace(/^www\./, "")
+    .split(".")[0]
+    .replace(/[^a-z0-9]/gi, "");
+
+  if (baseEmail && baseEmail.includes("@")) {
+    const parts = baseEmail.split("@");
+    return `${parts[0]}+${cleanDomain}.${rnd}@${parts[1]}`;
+  }
+  return `alias.${cleanDomain}.${rnd}@sentinelbit.vault`;
 }
 
 /**
@@ -626,6 +835,10 @@ function initInPageAutofill() {
       { action: "GET_MATCHING_LOGINS", url: window.location.href },
       (res) => {
         if (chrome.runtime.lastError || !res) return;
+        if (res.isExcluded) {
+          removeOverlayContainer();
+          return;
+        }
         activeMatchingLogins = res.matches || [];
         activeMatchingPasskeys = res.passkeys || [];
         if (activeMatchingLogins.length > 0 || activeMatchingPasskeys.length > 0) {
@@ -847,6 +1060,109 @@ function ensureOverlayContainer() {
       .sb-toast-icon {
         font-size: 14px;
       }
+
+      /* WebAuthn Passkey Approval Modal */
+      .sb-modal-overlay {
+        position: fixed;
+        top: 24px;
+        right: 24px;
+        pointer-events: auto;
+        z-index: 2147483647;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-12px) scale(0.96);
+        transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .sb-modal-overlay.open {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0) scale(1);
+      }
+      .sb-modal-box {
+        width: 320px;
+        background: #0f172a;
+        border: 1px solid rgba(139, 92, 246, 0.55);
+        border-radius: 12px;
+        padding: 14px;
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.75), 0 0 15px rgba(139, 92, 246, 0.25);
+        color: #f8fafc;
+      }
+      .sb-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 8px;
+      }
+      .sb-modal-brand {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 700;
+        font-size: 13px;
+        color: #c4b5fd;
+      }
+      .sb-modal-badge {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: rgba(139, 92, 246, 0.2);
+        color: #c4b5fd;
+        border: 1px solid rgba(139, 92, 246, 0.4);
+      }
+      .sb-modal-body {
+        margin-bottom: 14px;
+      }
+      .sb-modal-text {
+        font-size: 12px;
+        color: #94a3b8;
+        margin-bottom: 4px;
+      }
+      .sb-modal-user {
+        font-size: 14px;
+        font-weight: 600;
+        color: #f1f5f9;
+        word-break: break-all;
+      }
+      .sb-modal-rp {
+        font-size: 11px;
+        color: #818cf8;
+        margin-top: 2px;
+      }
+      .sb-modal-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .sb-modal-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        transition: all 0.15s ease;
+      }
+      .sb-modal-btn-primary {
+        background: linear-gradient(135deg, #7c3aed, #4f46e5);
+        color: #ffffff;
+        box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35);
+      }
+      .sb-modal-btn-primary:hover {
+        filter: brightness(1.1);
+        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.5);
+      }
+      .sb-modal-btn-secondary {
+        background: #1e293b;
+        color: #cbd5e1;
+        border: 1px solid #334155;
+      }
+      .sb-modal-btn-secondary:hover {
+        background: #334155;
+        color: #ffffff;
+      }
     </style>
 
     <div class="sb-trigger-btn" id="sb-btn" title="sentinelbit: Klick zum Ausfüllen">
@@ -875,6 +1191,30 @@ function ensureOverlayContainer() {
     <div class="sb-toast" id="sb-toast">
       <span class="sb-toast-icon" id="sb-toast-icon">✓</span>
       <span class="sb-toast-text" id="sb-toast-text"></span>
+    </div>
+
+    <!-- Passkey Prompt Modal -->
+    <div class="sb-modal-overlay" id="sb-passkey-modal">
+      <div class="sb-modal-box">
+        <div class="sb-modal-header">
+          <div class="sb-modal-brand">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" style="width: 18px; height: 18px;">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+            <span id="sb-pk-modal-title">sentinelbit Passkey</span>
+          </div>
+          <span class="sb-modal-badge" id="sb-pk-modal-badge">FIDO2</span>
+        </div>
+        <div class="sb-modal-body">
+          <div class="sb-modal-text" id="sb-pk-modal-text">Mit Passkey anmelden:</div>
+          <div class="sb-modal-user" id="sb-pk-modal-user">user</div>
+          <div class="sb-modal-rp" id="sb-pk-modal-rp">example.com</div>
+        </div>
+        <div class="sb-modal-actions">
+          <button class="sb-modal-btn sb-modal-btn-primary" id="sb-pk-modal-confirm">⚡ Anmelden</button>
+          <button class="sb-modal-btn sb-modal-btn-secondary" id="sb-pk-modal-cancel">Abbrechen</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -1129,14 +1469,45 @@ function updatePositions() {
   }
 }
 
-// 7. INITIALIZE IN-PAGE HOVER AUTOFILL ENGINE
+function setupCredentialDetection() {
+  document.addEventListener("submit", (e) => {
+    try {
+      const form = e.target;
+      if (!form || !(form instanceof HTMLFormElement)) return;
+      const pwdInputs = Array.from(form.querySelectorAll("input[type='password']")).filter(isElementFillable);
+      if (pwdInputs.length === 0) return;
+
+      const currentDomain = window.location.hostname.replace(/^www\./, "");
+
+      // 1. Password change detection (e.g. 2 password fields with same value)
+      if (pwdInputs.length >= 2) {
+        const val1 = pwdInputs[0].value;
+        const val2 = pwdInputs[1].value;
+        if (val1 && val2 && val1 === val2 && val1.length >= 6) {
+          showInPageNotification(`SentinelBit: Geändertes Passwort für ${currentDomain} erkannt! Bitte im Tresor aktualisieren.`, "🔑");
+          return;
+        }
+      }
+
+      // 2. New login detection (credentials entered on domain without saved logins)
+      const pwdVal = pwdInputs[0].value;
+      if (pwdVal && pwdVal.length >= 6 && activeMatchingLogins.length === 0) {
+        showInPageNotification(`SentinelBit: Neue Anmeldedaten für ${currentDomain} eingegeben. Im Tresor speichern?`, "🛡️");
+      }
+    } catch (err) {}
+  }, true);
+}
+
+// 7. INITIALIZE IN-PAGE HOVER AUTOFILL & CREDENTIAL DETECTION ENGINE
 if (!isSentinelBitVaultPage) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
       initInPageAutofill();
+      setupCredentialDetection();
     });
   } else {
     initInPageAutofill();
+    setupCredentialDetection();
   }
 
   // Observe dynamically loaded modal dialogs / forms & Step-2 2FA inputs
@@ -1170,5 +1541,482 @@ if (!isSentinelBitVaultPage) {
     }, 400);
   });
   domObserver.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+// =============================================================
+// WEBAUTHN / PASSKEY CRYPTO ENGINE & INTERCEPTION LOGIC
+// =============================================================
+
+let activeWebAuthnGetResolver = null;
+
+function promptPasskeyAssertion(passkey, rpId, callback) {
+  ensureOverlayContainer();
+  if (!shadowRoot) {
+    callback(true);
+    return;
+  }
+
+  const modal = shadowRoot.getElementById("sb-passkey-modal");
+  const title = shadowRoot.getElementById("sb-pk-modal-title");
+  const badge = shadowRoot.getElementById("sb-pk-modal-badge");
+  const text = shadowRoot.getElementById("sb-pk-modal-text");
+  const user = shadowRoot.getElementById("sb-pk-modal-user");
+  const rp = shadowRoot.getElementById("sb-pk-modal-rp");
+  const btnConfirm = shadowRoot.getElementById("sb-pk-modal-confirm");
+  const btnCancel = shadowRoot.getElementById("sb-pk-modal-cancel");
+
+  if (!modal || !btnConfirm || !btnCancel) {
+    callback(true);
+    return;
+  }
+
+  title.innerText = "sentinelbit Passkey";
+  badge.innerText = "FIDO2";
+  text.innerText = "Mit Passkey anmelden:";
+  user.innerText = passkey.username || "Hinterlegter Benutzer";
+  rp.innerText = rpId;
+  btnConfirm.innerText = "⚡ Anmelden";
+
+  modal.classList.add("open");
+
+  const cleanup = () => {
+    modal.classList.remove("open");
+    btnConfirm.onclick = null;
+    btnCancel.onclick = null;
+  };
+
+  btnConfirm.onclick = () => {
+    cleanup();
+    callback(true);
+  };
+
+  btnCancel.onclick = () => {
+    cleanup();
+    callback(false);
+  };
+}
+
+function promptPasskeyCreation(rpName, rpId, username, callback) {
+  ensureOverlayContainer();
+  if (!shadowRoot) {
+    callback(true);
+    return;
+  }
+
+  const modal = shadowRoot.getElementById("sb-passkey-modal");
+  const title = shadowRoot.getElementById("sb-pk-modal-title");
+  const badge = shadowRoot.getElementById("sb-pk-modal-badge");
+  const text = shadowRoot.getElementById("sb-pk-modal-text");
+  const user = shadowRoot.getElementById("sb-pk-modal-user");
+  const rp = shadowRoot.getElementById("sb-pk-modal-rp");
+  const btnConfirm = shadowRoot.getElementById("sb-pk-modal-confirm");
+  const btnCancel = shadowRoot.getElementById("sb-pk-modal-cancel");
+
+  if (!modal || !btnConfirm || !btnCancel) {
+    callback(true);
+    return;
+  }
+
+  title.innerText = "Passkey erstellen";
+  badge.innerText = "NEU";
+  text.innerText = `Neuen Passkey für ${rpName} in Sentinelbit speichern?`;
+  user.innerText = username || "Account";
+  rp.innerText = rpId;
+  btnConfirm.innerText = "🔑 Im Tresor speichern";
+
+  modal.classList.add("open");
+
+  const cleanup = () => {
+    modal.classList.remove("open");
+    btnConfirm.onclick = null;
+    btnCancel.onclick = null;
+  };
+
+  btnConfirm.onclick = () => {
+    cleanup();
+    callback(true);
+  };
+
+  btnCancel.onclick = () => {
+    cleanup();
+    callback(false);
+  };
+}
+
+async function handleWebAuthnGetRequest(requestId, options) {
+  const { rpId, challenge, allowCredentials, mediation } = options;
+
+  chrome.runtime.sendMessage({
+    action: "WEBAUTHN_GET_MATCHES",
+    rpId: rpId,
+    allowCredentials: allowCredentials
+  }, async (response) => {
+    if (chrome.runtime.lastError || !response || response.status !== "ok" || !response.passkeys || response.passkeys.length === 0) {
+      window.postMessage({
+        source: "SENTINELBIT_CONTENT_WEBAUTHN",
+        requestId,
+        status: "fallback"
+      }, "*");
+      return;
+    }
+
+    const passkey = response.passkeys[0];
+
+    // Conditional UI (autofill mediation)
+    if (mediation === "conditional") {
+      activeWebAuthnGetResolver = async (selectedPk) => {
+        try {
+          const assertion = await signWebAuthnAssertion(selectedPk || passkey, rpId, challenge);
+          window.postMessage({
+            source: "SENTINELBIT_CONTENT_WEBAUTHN",
+            requestId,
+            status: "success",
+            data: assertion
+          }, "*");
+        } catch (e) {
+          window.postMessage({
+            source: "SENTINELBIT_CONTENT_WEBAUTHN",
+            requestId,
+            status: "fallback"
+          }, "*");
+        }
+      };
+      return;
+    }
+
+    promptPasskeyAssertion(passkey, rpId, async (approved) => {
+      if (!approved) {
+        window.postMessage({
+          source: "SENTINELBIT_CONTENT_WEBAUTHN",
+          requestId,
+          status: "fallback"
+        }, "*");
+        return;
+      }
+
+      try {
+        const assertion = await signWebAuthnAssertion(passkey, rpId, challenge);
+        showInPageNotification(`✓ Mit Passkey (${passkey.username || rpId}) angemeldet!`, "⚡");
+        window.postMessage({
+          source: "SENTINELBIT_CONTENT_WEBAUTHN",
+          requestId,
+          status: "success",
+          data: assertion
+        }, "*");
+      } catch (err) {
+        console.warn("[sentinelbit] Passkey signing error:", err);
+        showInPageNotification("Passkey-Signierung fehlgeschlagen", "⚠️");
+        window.postMessage({
+          source: "SENTINELBIT_CONTENT_WEBAUTHN",
+          requestId,
+          status: "fallback"
+        }, "*");
+      }
+    });
+  });
+}
+
+async function handleWebAuthnCreateRequest(requestId, options) {
+  const { rp, user, challenge } = options;
+  const rpId = rp.id || window.location.hostname;
+  const rpName = rp.name || rpId;
+  const username = user.name || user.displayName || "Account";
+
+  promptPasskeyCreation(rpName, rpId, username, async (approved) => {
+    if (!approved) {
+      window.postMessage({
+        source: "SENTINELBIT_CONTENT_WEBAUTHN",
+        requestId,
+        status: "fallback"
+      }, "*");
+      return;
+    }
+
+    try {
+      const keyPair = await crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        true,
+        ["sign", "verify"]
+      );
+
+      const privDer = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+      const privB64 = bufferToBase64Url(privDer);
+
+      const jwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+      const xBytes = base64UrlToBuffer(jwk.x);
+      const yBytes = base64UrlToBuffer(jwk.y);
+
+      const spkiDer = await crypto.subtle.exportKey("spki", keyPair.publicKey);
+      const spkiB64 = bufferToBase64Url(spkiDer);
+
+      const credIdBytes = new Uint8Array(32);
+      crypto.getRandomValues(credIdBytes);
+      const credentialId = bufferToBase64Url(credIdBytes);
+
+      const { attObj, authData } = await buildCborAttestationObject(rpId, credIdBytes, xBytes, yBytes, 0);
+
+      const clientData = {
+        type: "webauthn.create",
+        challenge: challenge,
+        origin: window.location.origin,
+        crossOrigin: false
+      };
+      const clientDataJSON = new TextEncoder().encode(JSON.stringify(clientData));
+
+      const newPasskey = {
+        rp_id: rpId,
+        rp_name: rpName,
+        username: username,
+        user_handle: user.id || "",
+        credential_id: credentialId,
+        encrypted_private_key: privB64,
+        decrypted_private_key: privB64,
+        public_key_cose: JSON.stringify({ kty: 2, alg: -7, crv: 1, x: jwk.x, y: jwk.y }),
+        public_key_pem: "",
+        sign_count: 0
+      };
+
+      chrome.runtime.sendMessage({
+        action: "WEBAUTHN_SAVE_PASSKEY",
+        passkey: newPasskey
+      });
+
+      showInPageNotification(`✓ Neuer Passkey für ${rpName} in Sentinelbit gespeichert!`, "⚡");
+
+      window.postMessage({
+        source: "SENTINELBIT_CONTENT_WEBAUTHN",
+        requestId,
+        status: "success",
+        data: {
+          id: credentialId,
+          rawIdB64: credentialId,
+          clientDataB64: bufferToBase64Url(clientDataJSON),
+          attestationObjectB64: bufferToBase64Url(attObj),
+          authDataB64: bufferToBase64Url(authData),
+          spkiB64: spkiB64
+        }
+      }, "*");
+    } catch (err) {
+      console.warn("[sentinelbit] Passkey registration error:", err);
+      showInPageNotification("Passkey-Erstellung fehlgeschlagen", "⚠️");
+      window.postMessage({
+        source: "SENTINELBIT_CONTENT_WEBAUTHN",
+        requestId,
+        status: "fallback"
+      }, "*");
+    }
+  });
+}
+
+function bufferToBase64Url(buffer) {
+  if (!buffer) return "";
+  let bytes;
+  if (buffer instanceof Uint8Array) bytes = buffer;
+  else if (buffer instanceof ArrayBuffer) bytes = new Uint8Array(buffer);
+  else if (ArrayBuffer.isView(buffer)) bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  else return "";
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBuffer(base64url) {
+  if (!base64url) return new Uint8Array(0);
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((base64url.length + 3) % 4);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function base64ToBuffer(b64) {
+  if (!b64) return new Uint8Array(0);
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function rawEcdsaToDer(signatureBytes) {
+  const r = signatureBytes.slice(0, 32);
+  const s = signatureBytes.slice(32, 64);
+  function formatInteger(buf) {
+    let i = 0;
+    while (i < buf.length - 1 && buf[i] === 0) i++;
+    const trimmed = buf.slice(i);
+    if (trimmed[0] & 0x80) {
+      const res = new Uint8Array(trimmed.length + 1);
+      res[0] = 0x00;
+      res.set(trimmed, 1);
+      return res;
+    }
+    return trimmed;
+  }
+  const rDer = formatInteger(r);
+  const sDer = formatInteger(s);
+  const totalLen = 2 + rDer.length + 2 + sDer.length;
+  const der = new Uint8Array(2 + totalLen);
+  der[0] = 0x30;
+  der[1] = totalLen;
+  der[2] = 0x02;
+  der[3] = rDer.length;
+  der.set(rDer, 4);
+  const sOffset = 4 + rDer.length;
+  der[sOffset] = 0x02;
+  der[sOffset + 1] = sDer.length;
+  der.set(sDer, sOffset + 2);
+  return der;
+}
+
+async function importEcdsaPrivateKey(keyMaterial) {
+  if (!keyMaterial) throw new Error("Private key material missing");
+
+  if (typeof keyMaterial === "string" && keyMaterial.includes("-----BEGIN")) {
+    const b64 = keyMaterial.replace(/-----BEGIN[^-]+-----/g, "").replace(/-----END[^-]+-----/g, "").replace(/\s+/g, "");
+    const der = base64ToBuffer(b64);
+    return await crypto.subtle.importKey("pkcs8", der.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  }
+
+  if (typeof keyMaterial === "string") {
+    let cleanB64 = keyMaterial.trim();
+    let derBytes = base64UrlToBuffer(cleanB64);
+    if (!derBytes || derBytes.length === 0) {
+      derBytes = base64ToBuffer(cleanB64);
+    }
+
+    try {
+      return await crypto.subtle.importKey("pkcs8", derBytes.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    } catch (e1) {
+      if (derBytes.length === 32) {
+        const pkcs8Prefix = new Uint8Array([
+          0x30, 0x51, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48,
+          0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
+          0x01, 0x07, 0x04, 0x37, 0x30, 0x35, 0x02, 0x01, 0x01, 0x04, 0x20
+        ]);
+        const fullPkcs8 = new Uint8Array(pkcs8Prefix.length + 32);
+        fullPkcs8.set(pkcs8Prefix, 0);
+        fullPkcs8.set(derBytes, pkcs8Prefix.length);
+        return await crypto.subtle.importKey("pkcs8", fullPkcs8.buffer, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+      }
+      throw e1;
+    }
+  }
+
+  if (keyMaterial instanceof ArrayBuffer || keyMaterial instanceof Uint8Array) {
+    const buf = keyMaterial instanceof Uint8Array ? keyMaterial.buffer : keyMaterial;
+    return await crypto.subtle.importKey("pkcs8", buf, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  }
+
+  throw new Error("Unsupported private key format");
+}
+
+async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
+  const privateKeyMaterial = passkey.decrypted_private_key || passkey.encrypted_private_key;
+  if (!privateKeyMaterial) throw new Error("Kein privater Schlüssel für Passkey vorhanden");
+
+  const privateKey = await importEcdsaPrivateKey(privateKeyMaterial);
+
+  const clientData = {
+    type: "webauthn.get",
+    challenge: challengeB64,
+    origin: window.location.origin,
+    crossOrigin: false
+  };
+  const clientDataJSON = new TextEncoder().encode(JSON.stringify(clientData));
+  const clientDataHash = await crypto.subtle.digest("SHA-256", clientDataJSON);
+
+  const rpIdHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rpId));
+  const authData = new Uint8Array(37);
+  authData.set(new Uint8Array(rpIdHash), 0);
+  authData[32] = 0x05; // User Present (0x01) | User Verified (0x04)
+  const count = (passkey.sign_count || 0) + 1;
+  authData[33] = (count >> 24) & 0xff;
+  authData[34] = (count >> 16) & 0xff;
+  authData[35] = (count >> 8) & 0xff;
+  authData[36] = count & 0xff;
+
+  const dataToSign = new Uint8Array(authData.length + 32);
+  dataToSign.set(authData, 0);
+  dataToSign.set(new Uint8Array(clientDataHash), authData.length);
+
+  const rawSig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: { name: "SHA-256" } },
+    privateKey,
+    dataToSign
+  );
+
+  const derSig = rawEcdsaToDer(new Uint8Array(rawSig));
+
+  return {
+    id: passkey.credential_id,
+    rawIdB64: passkey.credential_id,
+    clientDataB64: bufferToBase64Url(clientDataJSON),
+    authDataB64: bufferToBase64Url(authData),
+    signatureB64: bufferToBase64Url(derSig),
+    userHandleB64: passkey.user_handle || ""
+  };
+}
+
+async function buildCborAttestationObject(rpId, credIdBytes, xBytes, yBytes, signCount = 0) {
+  const rpIdHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rpId));
+  const flags = new Uint8Array([0x45]); // UP (0x01) | UV (0x04) | AT (0x40)
+  const countBytes = new Uint8Array(4);
+  countBytes[0] = (signCount >> 24) & 0xff;
+  countBytes[1] = (signCount >> 16) & 0xff;
+  countBytes[2] = (signCount >> 8) & 0xff;
+  countBytes[3] = signCount & 0xff;
+  const aaguid = new Uint8Array(16);
+  const credIdLen = new Uint8Array([(credIdBytes.length >> 8) & 0xff, credIdBytes.length & 0xff]);
+
+  const coseHeader = new Uint8Array([
+    0xa5,
+    0x01, 0x02,
+    0x03, 0x26,
+    0x20, 0x01,
+    0x21, 0x58, 0x20
+  ]);
+  const coseMid = new Uint8Array([
+    0x22, 0x58, 0x20
+  ]);
+
+  const coseKey = new Uint8Array(coseHeader.length + 32 + coseMid.length + 32);
+  coseKey.set(coseHeader, 0);
+  coseKey.set(xBytes, coseHeader.length);
+  coseKey.set(coseMid, coseHeader.length + 32);
+  coseKey.set(yBytes, coseHeader.length + 32 + coseMid.length);
+
+  const authDataTotalLen = 32 + 1 + 4 + 16 + 2 + credIdBytes.length + coseKey.length;
+  const authData = new Uint8Array(authDataTotalLen);
+  let offset = 0;
+  authData.set(new Uint8Array(rpIdHash), offset); offset += 32;
+  authData.set(flags, offset); offset += 1;
+  authData.set(countBytes, offset); offset += 4;
+  authData.set(aaguid, offset); offset += 16;
+  authData.set(credIdLen, offset); offset += 2;
+  authData.set(credIdBytes, offset); offset += credIdBytes.length;
+  authData.set(coseKey, offset);
+
+  const cborPrefix = new Uint8Array([
+    0xa3,
+    0x63, 0x66, 0x6d, 0x74,
+    0x64, 0x6e, 0x6f, 0x6e, 0x65,
+    0x67, 0x61, 0x74, 0x74, 0x53, 0x74, 0x6d, 0x74,
+    0xa0,
+    0x68, 0x61, 0x75, 0x74, 0x68, 0x44, 0x61, 0x74, 0x61
+  ]);
+
+  let authDataHeader;
+  if (authData.length < 256) {
+    authDataHeader = new Uint8Array([0x58, authData.length]);
+  } else {
+    authDataHeader = new Uint8Array([0x59, (authData.length >> 8) & 0xff, authData.length & 0xff]);
+  }
+
+  const attObj = new Uint8Array(cborPrefix.length + authDataHeader.length + authData.length);
+  attObj.set(cborPrefix, 0);
+  attObj.set(authDataHeader, cborPrefix.length);
+  attObj.set(authData, cborPrefix.length + authDataHeader.length);
+
+  return { attObj, authData };
 }
 

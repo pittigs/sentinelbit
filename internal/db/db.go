@@ -47,8 +47,13 @@ func InitDB() (*sql.DB, error) {
 			return
 		}
 
-		// Enable WAL mode for high concurrency & set busy timeout
+		// Enable WAL mode & performance tuning for high concurrency
 		_, _ = DB.Exec("PRAGMA journal_mode = WAL;")
+		_, _ = DB.Exec("PRAGMA synchronous = NORMAL;")
+		_, _ = DB.Exec("PRAGMA cache_size = -64000;")
+		_, _ = DB.Exec("PRAGMA mmap_size = 268435456;")
+		_, _ = DB.Exec("PRAGMA temp_store = MEMORY;")
+		_, _ = DB.Exec("PRAGMA auto_vacuum = INCREMENTAL;")
 		_, _ = DB.Exec("PRAGMA foreign_keys = ON;")
 		_, _ = DB.Exec("PRAGMA busy_timeout = 5000;")
 		DB.SetMaxOpenConns(25)
@@ -68,6 +73,10 @@ func InitCustomDB(dbPath string) (*sql.DB, error) {
 	}
 
 	_, _ = customDB.Exec("PRAGMA journal_mode = WAL;")
+	_, _ = customDB.Exec("PRAGMA synchronous = NORMAL;")
+	_, _ = customDB.Exec("PRAGMA cache_size = -64000;")
+	_, _ = customDB.Exec("PRAGMA mmap_size = 268435456;")
+	_, _ = customDB.Exec("PRAGMA temp_store = MEMORY;")
 	_, _ = customDB.Exec("PRAGMA foreign_keys = ON;")
 	_, _ = customDB.Exec("PRAGMA busy_timeout = 5000;")
 	customDB.SetMaxOpenConns(25)
@@ -192,11 +201,78 @@ func runMigrations(db *sql.DB) error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS secure_sends (
+		id TEXT PRIMARY KEY,
+		encrypted_payload TEXT NOT NULL,
+		burn_limit INTEGER DEFAULT 1,
+		view_count INTEGER DEFAULT 0,
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS webhooks (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		url TEXT NOT NULL,
+		secret TEXT NOT NULL,
+		events TEXT NOT NULL DEFAULT 'vault:change',
+		is_active INTEGER DEFAULT 1,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS emergency_contacts (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		contact_email TEXT NOT NULL,
+		wait_time_days INTEGER DEFAULT 30,
+		status TEXT DEFAULT 'pending',
+		created_at TEXT NOT NULL,
+		last_activity_at TEXT,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS team_vaults (
+		id TEXT PRIMARY KEY,
+		owner_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS team_members (
+		id TEXT PRIMARY KEY,
+		vault_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'viewer',
+		encrypted_vault_key TEXT NOT NULL,
+		expires_at TEXT,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY (vault_id) REFERENCES team_vaults(id) ON DELETE CASCADE,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		action TEXT NOT NULL,
+		resource_type TEXT NOT NULL,
+		resource_id TEXT NOT NULL,
+		ip_address TEXT,
+		details TEXT,
+		created_at TEXT NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_vault_items_user_active ON vault_items(user_id, deleted_at, favorite);
 	CREATE INDEX IF NOT EXISTS idx_passkeys_user_active ON passkeys(user_id, deleted_at);
 	CREATE INDEX IF NOT EXISTS idx_shared_items_recipient ON shared_items(recipient_username);
 	CREATE INDEX IF NOT EXISTS idx_email_aliases_user ON email_aliases(user_id);
 	CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_secure_sends_expires ON secure_sends(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id);
+	CREATE INDEX IF NOT EXISTS idx_team_members_vault ON team_members(vault_id, user_id);
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
 	`
 
 	if _, err := db.Exec(schema); err != nil {

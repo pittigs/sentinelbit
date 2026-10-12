@@ -1,0 +1,32 @@
+replicaCount: 1
+
+image:
+  repository: sentinelbit
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: "traefik"
+  hosts:
+    - host: sentinelbit.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+persistence:
+  enabled: true
+  size: 5Gi
+  mountPath: /data
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi

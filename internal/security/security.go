@@ -243,3 +243,72 @@ func GetIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+
+// TokenBucket implements a high-performance thread-safe token bucket rate limiter (#44)
+type TokenBucket struct {
+	tokens         float64
+	capacity       float64
+	refillRate     float64
+	lastRefillTime time.Time
+}
+
+type TokenBucketLimiter struct {
+	mu         sync.Mutex
+	capacity   float64
+	refillRate float64
+	buckets    map[string]*TokenBucket
+}
+
+func NewTokenBucketLimiter(capacity, refillRate float64) *TokenBucketLimiter {
+	return &TokenBucketLimiter{
+		capacity:   capacity,
+		refillRate: refillRate,
+		buckets:    make(map[string]*TokenBucket),
+	}
+}
+
+func (tbl *TokenBucketLimiter) Allow(key string) bool {
+	tbl.mu.Lock()
+	defer tbl.mu.Unlock()
+
+	now := time.Now()
+	b, exists := tbl.buckets[key]
+	if !exists {
+		tbl.buckets[key] = &TokenBucket{
+			tokens:         tbl.capacity - 1,
+			capacity:       tbl.capacity,
+			refillRate:     tbl.refillRate,
+			lastRefillTime: now,
+		}
+		return true
+	}
+
+	elapsed := now.Sub(b.lastRefillTime).Seconds()
+	b.tokens = b.tokens + elapsed*b.refillRate
+	if b.tokens > b.capacity {
+		b.tokens = b.capacity
+	}
+	b.lastRefillTime = now
+
+	if b.tokens >= 1.0 {
+		b.tokens -= 1.0
+		return true
+	}
+	return false
+}
+
+func TokenBucketMiddleware(limiter *TokenBucketLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := GetIP(r)
+			if !limiter.Allow(ip) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"detail":"Rate limit exceeded. Please slow down."}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+

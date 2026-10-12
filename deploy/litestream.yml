@@ -1,0 +1,15 @@
+# SentinelBit Geo-Redundant SQLite Live-Replication with Litestream (#89)
+# https://litestream.io/
+
+dbs:
+  - path: /data/vault.db
+    replicas:
+      # S3 / MinIO / Cloudflare R2 / Backblaze B2 Replica
+      - type: s3
+        bucket: sentinelbit-vault-backup
+        path: db
+        endpoint: https://s3.eu-central-1.amazonaws.com
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        sync-interval: 10s
+        retention: 720h # 30 days

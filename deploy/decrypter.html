@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SentinelBit - Notfall-Entschlüssler (Offline Disaster Recovery)</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --text: #f3f4f6;
+      --text-dim: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #34d399;
+      --danger: #f87171;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      width: 100%;
+      max-width: 900px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    p.subtitle {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #cbd5e1;
+    }
+    input[type="file"], input[type="password"], input[type="text"] {
+      width: 100%;
+      padding: 12px 14px;
+      background: #0b0f19;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="file"] {
+      padding: 10px;
+      cursor: pointer;
+    }
+    input:focus {
+      border-color: var(--primary);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--primary);
+      color: #0f172a;
+      border: none;
+      padding: 12px 20px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: var(--primary-hover); color: #fff; }
+    .btn-secondary {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+    }
+    .btn-secondary:hover { background: #334155; }
+    .status-box {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      margin-top: 14px;
+      display: none;
+    }
+    .status-box.error {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+    .status-box.success {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+    }
+    .search-box {
+      margin-bottom: 16px;
+    }
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 520px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .item-card {
+      background: #0b0f19;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 14px 16px;
+      transition: border-color 0.15s;
+    }
+    .item-card:hover { border-color: #38bdf8; }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .item-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    .item-type {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #1e293b;
+      color: #94a3b8;
+    }
+    .item-fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 8px;
+      font-size: 0.85rem;
+    }
+    .field-box {
+      background: #111827;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #1f2937;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      word-break: break-all;
+    }
+    .field-val {
+      font-family: monospace;
+      color: #34d399;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-right: 8px;
+    }
+    .copy-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 2px 4px;
+    }
+    .copy-btn:hover { color: #38bdf8; }
+    .offline-notice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 16px;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <span class="badge">100% OFFLINE DISASTER RECOVERY</span>
+      <h1>🛡️ SentinelBit Notfall-Entschlüssler</h1>
+      <p class="subtitle">
+        Autarkes Tool zur Zero-Knowledge Entschlüsselung von SentinelBit JSON-Backups.
+        Läuft vollständig in deinem Browser – ohne Internetverbindung, ohne Backend-Server.
+      </p>
+    </header>
+
+    <div class="card" id="unlock-card">
+      <div class="form-group">
+        <label for="backup-file">1. Verschlüsselte Backup-Datei (.json) auswählen:</label>
+        <input type="file" id="backup-file" accept=".json">
+      </div>
+
+      <div class="form-group">
+        <label for="master-password">2. Dein Master-Passwort:</label>
+        <input type="password" id="master-password" placeholder="Master-Passwort eingeben...">
+      </div>
+
+      <button type="button" class="btn" id="btn-decrypt" onclick="executeDecryption()">
+        🔓 Backup jetzt entschlüsseln
+      </button>
+
+      <div class="status-box" id="status-box"></div>
+    </div>
+
+    <div class="card" id="results-card" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2 style="font-size: 1.2rem; color: #fff;">Entschlüsselte Tresor-Einträge</h2>
+          <span style="font-size: 0.8rem; color: var(--text-dim);" id="items-count-label">0 Einträge geladen</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-secondary" style="width: auto; padding: 6px 12px; font-size: 0.8rem;" onclick="exportPlaintextJSON()">
+            💾 Als Klartext-JSON sichern
+          </button>
+        </div>
+      </div>
+
+      <div class="search-box">
+        <input type="text" id="search-filter" placeholder="Einträge durchsuchen (Titel, Benutzername, URL)..." oninput="filterResults()">
+      </div>
+
+      <div class="item-list" id="items-container">
+        <!-- Decrypted items populate here -->
+      </div>
+    </div>
+
+    <div class="offline-notice">
+      🔒 Keine Netzwerkanfragen · PBKDF2 (100.000 Iterationen) · AES-256-GCM Web Crypto API
+    </div>
+  </div>
+
+  <script>
+    let rawBackupData = null;
+    let decryptedList = [];
+
+    document.getElementById("backup-file").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          rawBackupData = JSON.parse(event.target.result);
+          showStatus(`Backup-Datei "${file.name}" geladen (Salt vorhanden).`, "success");
+        } catch (err) {
+          showStatus("Ungültige JSON-Datei: " + err.message, "error");
+          rawBackupData = null;
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function showStatus(msg, type = "info") {
+      const box = document.getElementById("status-box");
+      box.className = "status-box " + type;
+      box.innerText = msg;
+      box.style.display = "block";
+    }
+
+    function hexToBuffer(hex) {
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < hex.length; i += 2) {
+        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+      }
+      return bytes.buffer;
+    }
+
+    function bufferToStr(buf) {
+      return new TextDecoder().decode(buf);
+    }
+
+    async function deriveKey(password, encSalt) {
+      const enc = new TextEncoder();
+      const pwKey = await window.crypto.subtle.importKey(
+        "raw",
+        enc.encode(password),
+        { name: "PBKDF2" },
+        false,
+        ["deriveKey"]
+      );
+
+      return await window.crypto.subtle.deriveKey(
+        {
+          name: "PBKDF2",
+          salt: enc.encode(encSalt),
+          iterations: 100000,
+          hash: "SHA-256"
+        },
+        pwKey,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["decrypt"]
+      );
+    }
+
+    async function decryptPayload(payloadStr, cryptoKey) {
+      try {
+        const parsed = JSON.parse(payloadStr);
+        const iv = hexToBuffer(parsed.iv);
+        const ciphertext = hexToBuffer(parsed.data);
+
+        const decrypted = await window.crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: new Uint8Array(iv) },
+          cryptoKey,
+          ciphertext
+        );
+        return JSON.parse(bufferToStr(decrypted));
+      } catch (err) {
+        return null;
+      }
+    }
+
+    async function executeDecryption() {
+      if (!rawBackupData) {
+        showStatus("Bitte wähle zuerst eine Backup-JSON-Datei aus.", "error");
+        return;
+      }
+      const password = document.getElementById("master-password").value;
+      if (!password) {
+        showStatus("Bitte gib dein Master-Passwort ein.", "error");
+        return;
+      }
+
+      if (!rawBackupData.enc_salt) {
+        showStatus("Fehler: 'enc_salt' fehlt in dieser Backup-Datei.", "error");
+        return;
+      }
+
+      const btn = document.getElementById("btn-decrypt");
+      btn.disabled = true;
+      btn.innerText = "⏳ Entschlüssle via PBKDF2 & Web Crypto...";
+      showStatus("Berechne kryptografische Schlüssel (100.000 Runden)...", "info");
+
+      try {
+        const key = await deriveKey(password, rawBackupData.enc_salt);
+        const items = rawBackupData.items || [];
+        decryptedList = [];
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const it of items) {
+          if (!it.encrypted_payload) continue;
+          const decData = await decryptPayload(it.encrypted_payload, key);
+          if (decData) {
+            decryptedList.push({
+              id: it.id,
+              type: it.type || "login",
+              title: it.title || "Ohne Titel",
+              folder: it.folder || "",
+              data: decData
+            });
+            successCount++;
+          } else {
+            failCount++;
+          }
+        }
+
+        if (successCount === 0 && items.length > 0) {
+          throw new Error("Falsches Master-Passwort! Entschlüsselung fehlgeschlagen.");
+        }
+
+        showStatus(`Erfolgreich ${successCount} Einträge entschlüsselt!${failCount ? ` (${failCount} Fehler)` : ''}`, "success");
+        document.getElementById("results-card").style.display = "block";
+        document.getElementById("items-count-label").innerText = `${successCount} Einträge entschlüsselt`;
+        renderItems(decryptedList);
+      } catch (err) {
+        showStatus(err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "🔓 Backup jetzt entschlüsseln";
+      }
+    }
+
+    function renderItems(list) {
+      const container = document.getElementById("items-container");
+      container.innerHTML = "";
+
+      if (list.length === 0) {
+        container.innerHTML = `<div style="text-align: center; color: var(--text-dim); padding: 24px;">Keine Einträge gefunden.</div>`;
+        return;
+      }
+
+      list.forEach(it => {
+        const card = document.createElement("div");
+        card.className = "item-card";
+
+        let fieldsHtml = "";
+        if (it.type === "login") {
+          const user = it.data.username || "–";
+          const pwd = it.data.password || "–";
+          const url = it.data.url || "–";
+          const totp = it.data.totp || "";
+          fieldsHtml = `
+            <div class="field-box">
+              <span style="color: var(--text-dim); font-size: 0.75rem;">Benutzer:</span>
+              <span class="field-val" title="${user}">${escapeHtml(user)}</span>
+              <button class="copy-btn" onclick="copyText('${escapeJs(user)}')">📋</button>
+            </div>
+            <div class="field-box">
+              <span style="color: var(--text-dim); font-size: 0.75rem;">Passwort:</span>
+              <span class="field-val" title="${pwd}">${escapeHtml(pwd)}</span>
+              <button class="copy-btn" onclick="copyText('${escapeJs(pwd)}')">📋</button>
+            </div>
+            ${url !== '–' ? `
+              <div class="field-box" style="grid-column: 1 / -1;">
+                <span style="color: var(--text-dim); font-size: 0.75rem;">URL:</span>
+                <span class="field-val" style="color: #60a5fa;" title="${url}">${escapeHtml(url)}</span>
+                <button class="copy-btn" onclick="copyText('${escapeJs(url)}')">📋</button>
+              </div>
+            ` : ''}
+            ${totp ? `
+              <div class="field-box" style="grid-column: 1 / -1;">
+                <span style="color: var(--text-dim); font-size: 0.75rem;">TOTP-Schlüssel:</span>
+                <span class="field-val" style="color: #fbbf24;" title="${totp}">${escapeHtml(totp)}</span>
+                <button class="copy-btn" onclick="copyText('${escapeJs(totp)}')">📋</button>
+              </div>
+            ` : ''}
+          `;
+        } else if (it.type === "note") {
+          const noteText = it.data.notes || "";
+          fieldsHtml = `
+            <div class="field-box" style="grid-column: 1 / -1; display: block;">
+              <div style="color: var(--text-dim); font-size: 0.75rem; margin-bottom: 4px;">Notizinhalt:</div>
+              <pre style="font-family: inherit; font-size: 0.85rem; color: #cbd5e1; white-space: pre-wrap; word-break: break-all;">${escapeHtml(noteText)}</pre>
+            </div>
+          `;
+        } else if (it.type === "card") {
+          const num = it.data.cardNumber || "–";
+          const exp = it.data.expiry || "–";
+          const cvv = it.data.cvv || "–";
+          fieldsHtml = `
+            <div class="field-box">
+              <span style="color: var(--text-dim); font-size: 0.75rem;">Karten-Nr:</span>
+              <span class="field-val">${escapeHtml(num)}</span>
+              <button class="copy-btn" onclick="copyText('${escapeJs(num)}')">📋</button>
+            </div>
+            <div class="field-box">
+              <span style="color: var(--text-dim); font-size: 0.75rem;">Gültig:</span>
+              <span class="field-val">${escapeHtml(exp)}</span>
+            </div>
+            <div class="field-box">
+              <span style="color: var(--text-dim); font-size: 0.75rem;">CVV:</span>
+              <span class="field-val">${escapeHtml(cvv)}</span>
+              <button class="copy-btn" onclick="copyText('${escapeJs(cvv)}')">📋</button>
+            </div>
+          `;
+        }
+
+        card.innerHTML = `
+          <div class="item-header">
+            <span class="item-title">${escapeHtml(it.title)}</span>
+            <span class="item-type">${escapeHtml(it.type.toUpperCase())}</span>
+          </div>
+          <div class="item-fields">
+            ${fieldsHtml}
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function filterResults() {
+      const q = (document.getElementById("search-filter").value || "").toLowerCase().trim();
+      if (!q) {
+        renderItems(decryptedList);
+        return;
+      }
+      const filtered = decryptedList.filter(it => {
+        const title = (it.title || "").toLowerCase();
+        const user = (it.data.username || "").toLowerCase();
+        const url = (it.data.url || "").toLowerCase();
+        const notes = (it.data.notes || "").toLowerCase();
+        return title.includes(q) || user.includes(q) || url.includes(q) || notes.includes(q);
+      });
+      renderItems(filtered);
+    }
+
+    function copyText(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("In die Zwischenablage kopiert!");
+      }).catch(() => {
+        prompt("Kopieren:", text);
+      });
+    }
+
+    function exportPlaintextJSON() {
+      const blob = new Blob([JSON.stringify(decryptedList, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sentinelbit-decrypted-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function escapeJs(str) {
+      if (!str) return "";
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+  </script>
+</body>
+</html>

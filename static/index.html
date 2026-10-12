@@ -40,7 +40,7 @@
         <form id="form-login" onsubmit="handleLogin(event)">
           <div class="form-group">
             <label for="login-username">Benutzername</label>
-            <input type="text" id="login-username" class="form-input" required placeholder="z. B. sebastian" autocomplete="username">
+            <input type="text" id="login-username" class="form-input" required placeholder="z. B. sebastian" autocomplete="username webauthn">
           </div>
           <div class="form-group">
             <label for="login-password">Master-Passwort</label>
@@ -259,6 +259,12 @@
           </div>
           <span class="badge" id="count-shared">0</span>
         </div>
+        <div class="nav-item" onclick="openSecureSendModal()" title="Secure Send (Burn-after-Reading Einmal-Links)">
+          <div class="nav-item-content" style="color: #ec4899;">
+            <span class="nav-icon">🚀</span>
+            <span class="nav-text">Secure Send</span>
+          </div>
+        </div>
         <div class="nav-item" onclick="openExtensionModal()" title="Browser-Erweiterung (Auto-Fill)">
           <div class="nav-item-content" style="color: #60a5fa;">
             <span class="nav-icon">🧩</span>
@@ -270,6 +276,36 @@
           <div class="nav-item-content" style="color: #fbbf24;">
             <span class="nav-icon">📄</span>
             <span class="nav-text">Notfall-Kit</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openChangePasswordModal()" title="Master-Passwort ändern (Atomare Re-Verschlüsselung)">
+          <div class="nav-item-content" style="color: #c084fc;">
+            <span class="nav-icon">🔑</span>
+            <span class="nav-text">Passwort ändern</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openShamirModal()" title="Shamir's Secret Sharing (3-aus-5 Notfall-Schlüssel)">
+          <div class="nav-item-content" style="color: #34d399;">
+            <span class="nav-icon">🧩</span>
+            <span class="nav-text">Notfall-Schlüssel</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openEmergencyContactsModal()" title="Digitaler Notfallzugriff (Totmann-Schalter)">
+          <div class="nav-item-content" style="color: #f97316;">
+            <span class="nav-icon">⏳</span>
+            <span class="nav-text">Totmann-Schalter</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openWebhooksModal()" title="Webhooks verwalten">
+          <div class="nav-item-content" style="color: #818cf8;">
+            <span class="nav-icon">🪝</span>
+            <span class="nav-text">Webhooks</span>
+          </div>
+        </div>
+        <div class="nav-item" onclick="openAuditLogModal()" title="Sicherheits-Auditprotokoll">
+          <div class="nav-item-content" style="color: #94a3b8;">
+            <span class="nav-icon">📜</span>
+            <span class="nav-text">Audit-Log</span>
           </div>
         </div>
       </div>
@@ -303,6 +339,10 @@
         </div>
 
         <div class="top-actions">
+          <!-- Language Toggle (DE / EN) (#60) -->
+          <button class="btn btn-secondary" id="lang-toggle-btn" onclick="toggleLanguage()" title="Sprache wechseln / Switch Language" style="font-size: 0.75rem; font-weight: bold; padding: 6px 10px;">
+            DE
+          </button>
           <!-- Dark/Light Theme Toggle -->
           <button class="btn btn-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Design umschalten (Dunkel / Hell)">
             🌙
@@ -458,7 +498,10 @@
 
           <!-- Integrated TOTP Authenticator field -->
           <div class="form-group">
-            <label for="item-totp" style="color: #34d399;">⏱️ 2FA-Schlüssel (TOTP / Authenticator Secret)</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="item-totp" style="color: #34d399; margin-bottom: 0;">⏱️ 2FA-Schlüssel (TOTP / Authenticator Secret)</label>
+              <button type="button" class="btn btn-secondary" style="font-size: 0.72rem; padding: 2px 8px;" onclick="openQrScannerModal()">📷 QR scannen</button>
+            </div>
             <input type="text" id="item-totp" class="form-input" placeholder="z. B. JBSWY3DPEHPK3PXP oder otpauth:// URI">
             <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">
               Wird automatisch in einen 6-stelligen rotierenden Code verwandelt (wie Google Authenticator).
@@ -888,9 +931,15 @@
         <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
           Lade eine vollständige JSON-Sicherung deiner Logins, Passkeys und Notizen herunter.
         </p>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
           <button class="btn btn-primary" onclick="exportVault(true)">🔒 Verschlüsseltes JSON-Backup</button>
           <button class="btn btn-secondary" onclick="exportVault(false)">📄 Entschlüsseltes JSON</button>
+          <a href="/static/decrypter.html" download="sentinelbit-notfall-entschluessler.html" class="btn btn-secondary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;" title="Autarkes HTML-Tool für Notfall-Wiederherstellung komplett offline">
+            🛠️ Notfall-Entschlüssler (HTML)
+          </a>
+          <button type="button" class="btn btn-secondary" onclick="openEmergencyKitModal()" style="display: inline-flex; align-items: center; gap: 6px;">
+            📄 Notfall-Kit drucken
+          </button>
         </div>
       </div>
 
@@ -1307,7 +1356,433 @@
     </div>
   </div>
 
+  <!-- ============================================================
+       MODAL: COMMAND PALETTE (Ctrl + K)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-command-palette" onclick="if(event.target === this) closeCommandPalette()">
+    <div class="modal-dialog cmd-palette-dialog" style="max-width: 600px; padding: 0; overflow: hidden; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.7);">
+      <div style="display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid #1e293b; gap: 10px;">
+        <span style="font-size: 1.2rem; color: #60a5fa;">⌘</span>
+        <input type="text" id="cmd-palette-input" placeholder="Suche Einträge oder tippe einen Befehl (Pfeiltasten + Enter)..." style="flex: 1; background: transparent; border: none; outline: none; color: white; font-size: 1rem;" autocomplete="off">
+        <span style="font-size: 0.72rem; background: #1e293b; color: #94a3b8; padding: 3px 6px; border-radius: 4px; border: 1px solid #334155;">ESC</span>
+      </div>
+      <div id="cmd-palette-results" style="max-height: 380px; overflow-y: auto; padding: 8px;">
+        <!-- Dynamic results populated by app.js -->
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 18px; background: #0b0f19; border-top: 1px solid #1e293b; font-size: 0.72rem; color: #64748b;">
+        <span><kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↑</kbd> <kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↓</kbd> Navigieren · <kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↵</kbd> Auswählen</span>
+        <span>SentinelBit Quick Command</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: SECURE SEND (Burn-after-Reading)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-secure-send">
+    <div class="modal-dialog" style="max-width: 580px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🚀</span>
+          <div>
+            <h3>SentinelBit Secure Send</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Einmal-Links mit Zero-Knowledge Ende-zu-Ende Verschlüsselung</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-secure-send')">✕</button>
+      </div>
+
+      <div id="secure-send-form-view">
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">
+          Teile Passwörter, API-Keys oder Notizen sicher mit Dritten. Der Inhalt wird im Browser verschlüsselt; der Schlüssel verbleibt ausschließlich im URL-Hash (#) und wird nach dem Abruf sofort vernichtet.
+        </p>
+
+        <div class="form-group">
+          <label for="send-secret-text">Geheimer Inhalt (Text / Passwort / API-Key)</label>
+          <textarea id="send-secret-text" class="form-input" rows="4" placeholder="Geheimen Text oder Zugangsdaten hier einfügen..." style="font-family: monospace;"></textarea>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="send-burn-limit">Zerstörung (Burn-Limit)</label>
+            <select id="send-burn-limit" class="form-input" style="cursor: pointer;">
+              <option value="1" selected>Nach 1x Abrufen zerstören</option>
+              <option value="3">Nach 3x Abrufen zerstören</option>
+              <option value="5">Nach 5x Abrufen zerstören</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="send-expire-hours">Gültigkeitsdauer (TTL)</label>
+            <select id="send-expire-hours" class="form-input" style="cursor: pointer;">
+              <option value="1">1 Stunde gültig</option>
+              <option value="24" selected>24 Stunden gültig</option>
+              <option value="72">3 Tage gültig</option>
+              <option value="168">7 Tage gültig</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-primary" id="btn-create-send" onclick="createSecureSendLink()" style="width: 100%; padding: 10px;">
+          🚀 Verschlüsselten Einmal-Link erstellen
+        </button>
+      </div>
+
+      <div id="secure-send-result-view" style="display: none;">
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px;">
+          <div style="font-weight: 600; color: #34d399; font-size: 0.95rem; margin-bottom: 4px;">✓ Einmal-Link erfolgreich generiert!</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);" id="send-result-burn-info">Wird nach dem ersten Aufruf automatisch zerstört.</div>
+        </div>
+
+        <div class="form-group">
+          <label>Einmal-Link zum Teilen (Zero-Knowledge):</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="send-result-url" class="form-input" readonly style="font-family: monospace; font-size: 0.8rem; background: #000;">
+            <button type="button" class="btn btn-secondary" onclick="copyToClipboard(document.getElementById('send-result-url').value, 'Link kopiert!')" style="white-space: nowrap;">📋 Kopieren</button>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding-top: 10px;">
+          <button type="button" class="btn btn-secondary" onclick="resetSecureSendModal()">Neuen Link erstellen</button>
+          <button type="button" class="btn btn-primary" onclick="closeModal('modal-secure-send')">Fertig</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: SECURE SEND VIEWER (Recipient View)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-send-viewer">
+    <div class="modal-dialog" style="max-width: 520px; text-align: center;">
+      <div style="font-size: 2.2rem; margin-bottom: 8px;">📬</div>
+      <h3 style="font-size: 1.2rem; color: #f3f4f6; margin-bottom: 6px;">Sichere Einmal-Nachricht</h3>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 16px;" id="send-viewer-status-text">
+        Diese Nachricht wurde Ende-zu-Ende verschlüsselt empfangen.
+      </p>
+
+      <div style="background: #000; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; font-family: monospace; font-size: 0.95rem; color: #34d399; word-break: break-all; margin-bottom: 16px; text-align: left; max-height: 200px; overflow-y: auto;" id="send-viewer-content">
+        Entschlüssele...
+      </div>
+
+      <div style="display: flex; gap: 8px; justify-content: center;">
+        <button type="button" class="btn btn-primary" id="btn-copy-send-viewer" onclick="copyToClipboard(document.getElementById('send-viewer-content').innerText, 'Inhalt kopiert!')">
+          📋 Inhalt kopieren
+        </button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-send-viewer'); window.location.hash = '';">
+          Schließen
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: EMERGENCY KIT (Druckbares Notfall-Rettungsblatt)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-emergency-kit">
+    <div class="modal-dialog" style="max-width: 680px; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">📄</span>
+          <div>
+            <h3>Notfall-Rettungsblatt (Emergency Kit)</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Druckbares Dokument für Notfälle und Hinterbliebene</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-emergency-kit')">✕</button>
+      </div>
+
+      <div style="overflow-y: auto; padding-right: 4px; flex: 1;">
+        <div id="emergency-kit-sheet" style="background: #fff; color: #111; padding: 24px; border-radius: 8px; font-family: sans-serif; font-size: 0.88rem; line-height: 1.5; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px;">
+            <div>
+              <h2 style="font-size: 1.3rem; margin: 0; color: #000; font-weight: 800; letter-spacing: -0.02em;">🛡️ SENTINELBIT NOTFALL-RETTUNGSBLATT</h2>
+              <div style="font-size: 0.75rem; color: #555;">Zero-Knowledge Passwort- & Passkey-Tresor</div>
+            </div>
+            <div style="text-align: right; font-size: 0.75rem; color: #555;">
+              <span>Dokument-Datum:</span><br>
+              <strong id="kit-generated-date" style="color: #000;">–</strong>
+            </div>
+          </div>
+
+          <p style="font-size: 0.8rem; color: #444; margin-bottom: 14px;">
+            <strong>Wichtig:</strong> Verwahre dieses Blatt sicher an einem geschützten Ort (z. B. Tresor, Schließfach oder bei vertrauten Personen). Es enthält alle technischen Schlüssel zur Wiederherstellung deines digitalen Nachlasses.
+          </p>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 0.85rem;">
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 6px 0; font-weight: bold; width: 160px; color: #333;">Benutzername:</td>
+              <td id="kit-username" style="font-family: monospace; font-size: 0.95rem; color: #000;">–</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 6px 0; font-weight: bold; color: #333;">Server-Adresse:</td>
+              <td id="kit-server-url" style="font-family: monospace; color: #000;">–</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 6px 0; font-weight: bold; color: #333;">Verschlüsselungs-Salt:</td>
+              <td id="kit-enc-salt" style="font-family: monospace; font-size: 0.72rem; word-break: break-all; color: #333;">–</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 6px 0; font-weight: bold; color: #333;">Authentifizierungs-Salt:</td>
+              <td id="kit-auth-salt" style="font-family: monospace; font-size: 0.72rem; word-break: break-all; color: #333;">–</td>
+            </tr>
+          </table>
+
+          <div style="border: 2px dashed #999; border-radius: 6px; padding: 12px; margin-bottom: 16px; background: #fdfdfd;">
+            <div style="font-weight: bold; font-size: 0.82rem; margin-bottom: 4px; text-transform: uppercase; color: #c00;">
+              🔒 Handschriftliches Master-Passwort (Hier eintragen):
+            </div>
+            <div style="height: 36px; border-bottom: 1px solid #999; margin-top: 10px;"></div>
+            <div style="font-size: 0.7rem; color: #777; margin-top: 4px;">
+              Aus Sicherheitsgründen wird dein Master-Passwort niemals digital gespeichert und muss hier handschriftlich notiert werden.
+            </div>
+          </div>
+
+          <div id="kit-recovery-codes-section" style="margin-bottom: 16px;">
+            <div style="font-weight: bold; font-size: 0.82rem; margin-bottom: 6px; color: #333;">2FA-Notfall-Wiederherstellungscodes:</div>
+            <div id="kit-recovery-codes" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-family: monospace; font-size: 0.8rem; background: #f4f4f4; padding: 10px; border-radius: 4px; color: #222;">
+              <span>(Keine Notfallcodes hinterlegt)</span>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid #ccc; padding-top: 10px; font-size: 0.72rem; color: #555; line-height: 1.4;">
+            <strong>Anleitung im Notfall:</strong><br>
+            1. Rufe die Server-Adresse auf oder öffne die autarke Notfall-Datei <code>decrypter.html</code> in einem beliebigen Browser.<br>
+            2. Wähle die verschlüsselte Backup-Datei (<code>sentinelbit-backup-encrypted.json</code>) aus und gib das handschriftliche Master-Passwort ein.<br>
+            3. Alle Passwörter, Passkeys und Notizen werden ohne Serververbindung lokal entschlüsselt.
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding-top: 12px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-emergency-kit')">Schließen</button>
+        <button type="button" class="btn btn-primary" onclick="printEmergencyKit()">🖨️ Rettungsblatt drucken / PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: 2FA QR-CODE SCANNER
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-qr-scanner">
+    <div class="modal-dialog" style="max-width: 440px; text-align: center;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.4rem;">📷</span>
+          <h3>2FA QR-Code Scanner</h3>
+        </div>
+        <button class="btn-icon" onclick="closeQrScannerModal()">✕</button>
+      </div>
+
+      <div style="position: relative; width: 100%; height: 280px; background: #000; border-radius: 8px; overflow: hidden; margin: 12px 0;">
+        <video id="qr-scanner-video" style="width: 100%; height: 100%; object-fit: cover;" playsinline></video>
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 180px; height: 180px; border: 2px solid #38bdf8; border-radius: 12px; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);"></div>
+      </div>
+
+      <p style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 12px;" id="qr-scanner-status">
+        Kamera auf den 2FA-QR-Code richten...
+      </p>
+
+      <div class="modal-footer" style="justify-content: center;">
+        <button type="button" class="btn btn-secondary" onclick="closeQrScannerModal()">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: MASTER PASSWORT ÄNDERN (RE-ENCRYPT)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-change-password">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🔑</span>
+          <div>
+            <h3>Master-Passwort ändern</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Atomare Re-Verschlüsselung aller Einträge</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-change-password')">✕</button>
+      </div>
+
+      <form onsubmit="event.preventDefault(); submitChangeMasterPassword();">
+        <div class="form-group">
+          <label for="change-pwd-current">Aktuelles Master-Passwort</label>
+          <input type="password" id="change-pwd-current" class="form-input" required placeholder="Aktuelles Passwort eingeben">
+        </div>
+
+        <div class="form-group">
+          <label for="change-pwd-new">Neues Master-Passwort</label>
+          <input type="password" id="change-pwd-new" class="form-input" required placeholder="Mindestens 10 Zeichen" minlength="10">
+        </div>
+
+        <div class="form-group">
+          <label for="change-pwd-confirm">Neues Master-Passwort bestätigen</label>
+          <input type="password" id="change-pwd-confirm" class="form-input" required placeholder="Wiederholen">
+        </div>
+
+        <div style="background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: var(--radius-md); padding: 12px; margin-bottom: 16px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+          <strong style="color: #c084fc;">⚡ Zero-Knowledge Re-Verschlüsselung:</strong><br>
+          Alle Tresor-Einträge werden lokal im Browser mit deinem neuen Schlüssel neu verschlüsselt und in einer einzigen atomaren Server-Transaktion gespeichert.
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-change-password')">Abbrechen</button>
+          <button type="submit" id="btn-submit-change-pwd" class="btn btn-primary" style="background: #a855f7;">🔑 Passwort jetzt ändern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: SHAMIR'S SECRET SHARING (SSS)
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-shamir">
+    <div class="modal-dialog" style="max-width: 650px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🧩</span>
+          <div>
+            <h3>Shamir's Secret Sharing (Notfall-Wiederherstellung)</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Mathematische 3-aus-5 Schlüssel-Aufteilung (GF(256))</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-shamir')">✕</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
+        Teile deinen Tresorschlüssel in <strong>5 Einzelschlüssel</strong> auf. Beliebige <strong>3 Schlüssel</strong> genügen, um den Tresor im Notfall wiederherzustellen. Einzelne oder 2 Schlüssel verraten mathematisch 0 Bit der Daten.
+      </p>
+
+      <button type="button" class="btn btn-primary" onclick="generateShamirShares()" style="margin-bottom: 14px;">
+        ✨ 5 Notfall-Schlüssel jetzt generieren
+      </button>
+
+      <div id="shamir-shares-container" style="display: none; margin-top: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong style="font-size: 0.85rem; color: #34d399;">🔑 Generierte Notfall-Schlüssel (Threshold: 3/5):</strong>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 10px;" onclick="copyAllShamirShares()">📋 Alle kopieren</button>
+        </div>
+        <div id="shamir-shares-list" style="display: flex; flex-direction: column; gap: 8px; font-family: monospace; font-size: 0.75rem;"></div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-shamir')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: WEBHOOKS VERWALTUNG
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-webhooks">
+    <div class="modal-dialog" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">🪝</span>
+          <div>
+            <h3>Webhook-System</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Echtzeit-Benachrichtigungen bei Tresor-Änderungen</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-webhooks')">✕</button>
+      </div>
+
+      <form onsubmit="event.preventDefault(); submitCreateWebhook();" style="margin-bottom: 20px;">
+        <div class="form-group">
+          <label for="webhook-url">Webhook-Ziel-URL (HTTP POST)</label>
+          <input type="url" id="webhook-url" class="form-input" required placeholder="https://example.com/webhook/sentinelbit">
+        </div>
+        <div class="form-group">
+          <label for="webhook-secret">Signatur-Geheimnis (Optional, wird generiert)</label>
+          <input type="text" id="webhook-secret" class="form-input" placeholder="Automatisches HMAC-SHA256 Secret">
+        </div>
+        <button type="submit" class="btn btn-primary">➕ Webhook anlegen</button>
+      </form>
+
+      <h4 style="margin-bottom: 8px; font-size: 0.9rem;">Aktive Webhooks</h4>
+      <div id="webhooks-list" style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-size: 0.8rem; color: var(--text-dim);">Lade Webhooks...</div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-webhooks')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: TOTMANN-SCHALTER & NOTFALL-KONTAKTE
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-emergency-contacts">
+    <div class="modal-dialog" style="max-width: 600px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">⏳</span>
+          <div>
+            <h3>Digitaler Notfallzugriff (Totmann-Schalter)</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Automatischer Zugriff bei längerer Inaktivität</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-emergency-contacts')">✕</button>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 16px;">
+        Hinterlege Notfallkontakte. Wenn du dich für die festgelegte Frist (z. B. 30 oder 90 Tage) nicht mehr anmeldest, erhält der Kontakt die Berechtigung, die Notfall-Wiederherstellung anzufordern.
+      </p>
+
+      <form onsubmit="event.preventDefault(); submitCreateEmergencyContact();" style="margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label for="emergency-email">E-Mail-Adresse des Kontakts</label>
+            <input type="email" id="emergency-email" class="form-input" required placeholder="vertrauensperson@example.com">
+          </div>
+          <div class="form-group">
+            <label for="emergency-wait-days">Wartezeit (Tage)</label>
+            <input type="number" id="emergency-wait-days" class="form-input" value="30" min="1" max="365">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">➕ Notfall-Kontakt hinterlegen</button>
+      </form>
+
+      <h4 style="margin-bottom: 8px; font-size: 0.9rem;">Hinterlegte Kontakte</h4>
+      <div id="emergency-contacts-list" style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-size: 0.8rem; color: var(--text-dim);">Lade Kontakte...</div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-emergency-contacts')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODAL: SICHERHEITS AUDIT-LOG
+  ============================================================ -->
+  <div class="modal-overlay" id="modal-audit-log">
+    <div class="modal-dialog" style="max-width: 650px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">📜</span>
+          <div>
+            <h3>Sicherheits Audit-Protokoll</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Protokollierte Sicherheitsereignisse deines Tresors</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-audit-log')">✕</button>
+      </div>
+
+      <div id="audit-logs-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto;">
+        <div style="font-size: 0.8rem; color: var(--text-dim);">Lade Protokolle...</div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 16px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-audit-log')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Container -->
+
   <div id="toast-container"></div>
 
   <script src="/static/app.js?v=3.1"></script>

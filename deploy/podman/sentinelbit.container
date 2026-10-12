@@ -1,0 +1,21 @@
+# Systemd Quadlet file for Rootless Podman (#87)
+# Place in ~/.config/containers/systemd/sentinelbit.container and run 'systemctl --user daemon-reload && systemctl --user start sentinelbit'
+
+[Unit]
+Description=SentinelBit Zero-Knowledge Vault (Rootless Podman)
+After=network-online.target
+
+[Container]
+Image=sentinelbit:latest
+ContainerName=sentinelbit
+PublishPort=8080:8080
+Volume=%h/sentinelbit-data:/data:Z
+Environment=SENTINELBIT_DATA_DIR=/data
+Environment=SENTINELBIT_PORT=8080
+Environment=SENTINELBIT_DISABLE_REGISTRATION=false
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

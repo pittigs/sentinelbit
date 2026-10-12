@@ -76,7 +76,11 @@ func CleanupExpired(database *sql.DB) {
 	SessionMu.Unlock()
 
 	if database != nil {
-		_, _ = database.Exec("DELETE FROM sessions WHERE expires_at < ?", now.UTC().Format(time.RFC3339))
+		nowIso := now.UTC().Format(time.RFC3339)
+		_, _ = database.Exec("DELETE FROM sessions WHERE expires_at < ?", nowIso)
+		_, _ = database.Exec("DELETE FROM secure_sends WHERE expires_at < ? OR access_count >= burn_limit", nowIso)
+		_, _ = database.Exec("PRAGMA incremental_vacuum(50);")
+		_, _ = database.Exec("PRAGMA optimize;")
 	}
 
 	LoginLimiter.Cleanup()

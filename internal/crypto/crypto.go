@@ -1,6 +1,8 @@
 package crypto
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
@@ -295,5 +297,75 @@ func GenerateDummySalts(serverSecret []byte, username string) (string, string) {
 	encSalt := hex.EncodeToString(d3[:16])
 
 	return fmt.Sprintf("%s:%s", clientSalt, serverSalt), encSalt
+}
+
+// DeriveMasterKey derives the 32-byte master encryption key from password and salt
+func DeriveMasterKey(masterPassword, encSalt string) []byte {
+	return pbkdf2.Key([]byte(masterPassword), []byte(encSalt), 100_000, 32, sha256.New)
+}
+
+// DecryptVaultPayload decrypts a JSON string of {"iv": "...", "data": "..."} with AES-256-GCM
+func DecryptVaultPayload(encryptedPayloadJSON string, key []byte) (map[string]interface{}, error) {
+	var raw struct {
+		IV   string `json:"iv"`
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(encryptedPayloadJSON), &raw); err != nil {
+		return nil, fmt.Errorf("invalid payload json: %w", err)
+	}
+	iv, err := hex.DecodeString(raw.IV)
+	if err != nil {
+		return nil, fmt.Errorf("invalid iv hex: %w", err)
+	}
+	ciphertext, err := hex.DecodeString(raw.Data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid data hex: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	plaintext, err := gcm.Open(nil, iv, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed (wrong key or corrupted data): %w", err)
+	}
+	var res map[string]interface{}
+	if err := json.Unmarshal(plaintext, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal decrypted json: %w", err)
+	}
+	return res, nil
+}
+
+// EncryptVaultPayload encrypts dataObj into JSON string {"iv": "...", "data": "..."}
+func EncryptVaultPayload(dataObj interface{}, key []byte) (string, error) {
+	plaintext, err := json.Marshal(dataObj)
+	if err != nil {
+		return "", err
+	}
+	iv := make([]byte, 12)
+	if _, err := rand.Read(iv); err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nil, iv, plaintext, nil)
+	out, err := json.Marshal(map[string]string{
+		"iv":   hex.EncodeToString(iv),
+		"data": hex.EncodeToString(ciphertext),
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 

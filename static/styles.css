@@ -1348,3 +1348,79 @@ h1, h2, h3, h4 {
 .strength-weak { width: 33%; background-color: var(--color-danger); }
 .strength-medium { width: 66%; background-color: var(--color-warning); }
 .strength-strong { width: 100%; background-color: var(--color-success); }
+
+/* -------------------------------------------------------------
+   Command Palette (Ctrl + K) Styling
+------------------------------------------------------------- */
+.cmd-palette-dialog {
+  animation: cmdScaleIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cmdScaleIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.cmd-group-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  padding: 8px 12px 4px;
+}
+
+.cmd-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-size: 0.88rem;
+}
+
+.cmd-item:hover, .cmd-item.selected {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.cmd-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-item-tag {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #emergency-kit-sheet, #emergency-kit-sheet * {
+    visibility: visible !important;
+  }
+  #emergency-kit-sheet {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 10mm !important;
+  }
+}
+

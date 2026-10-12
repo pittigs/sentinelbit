@@ -104,6 +104,7 @@
     </div>
     <div class="header-actions">
       <span class="status-badge" id="server-status">Prüfe...</span>
+      <button class="btn-icon" id="btn-sidepanel" title="In Seitenleiste öffnen">🪟</button>
       <button class="btn-icon" id="btn-sync" title="Jetzt aus geöffnetem Web-Tresor synchronisieren">🔄</button>
       <button class="btn-icon" id="btn-settings" title="Server & Auto-Lock Einstellungen">⚙️</button>
       <button class="btn-icon" id="btn-lock" title="Erweiterung sperren" style="display: none;">🔒</button>
@@ -114,21 +115,41 @@
   <div id="view-settings" style="display: none; margin-bottom: 10px;">
     <div class="unlock-card" style="text-align: left; padding: 14px;">
       <div style="font-weight: 700; font-size: 0.92rem; color: #60a5fa; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
-        <span>⚙️ Einstellungen</span>
+        <span>⚙️ Erweiterte Einstellungen</span>
         <button class="btn-icon" id="btn-close-settings" title="Schließen" style="width: 22px; height: 22px;">✕</button>
       </div>
 
       <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Server-URL (Self-Hosted):</label>
-      <input type="url" id="setting-server-url" class="search-input" placeholder="http://127.0.0.1:8000" style="margin-bottom: 10px;">
+      <input type="url" id="setting-server-url" class="search-input" placeholder="http://127.0.0.1:8000" style="margin-bottom: 8px;">
 
       <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Automatisches Sperren (Auto-Lock):</label>
-      <select id="setting-autolock" class="search-input" style="margin-bottom: 12px; cursor: pointer; background: #1f2937; color: white;">
+      <select id="setting-autolock" class="search-input" style="margin-bottom: 8px; cursor: pointer; background: #1f2937; color: white;">
         <option value="5">Nach 5 Minuten Inaktivität</option>
         <option value="15" selected>Nach 15 Minuten Inaktivität</option>
         <option value="30">Nach 30 Minuten Inaktivität</option>
         <option value="60">Nach 1 Stunde Inaktivität</option>
         <option value="0">Nie (Nur bei Browser-Schließen)</option>
       </select>
+
+      <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Zwischenablage leeren (Clipboard Sanitizer):</label>
+      <select id="setting-clipboard-clear" class="search-input" style="margin-bottom: 8px; cursor: pointer; background: #1f2937; color: white;">
+        <option value="15">Nach 15 Sekunden leeren</option>
+        <option value="30" selected>Nach 30 Sekunden leeren</option>
+        <option value="60">Nach 60 Sekunden leeren</option>
+        <option value="0">Nie leeren</option>
+      </select>
+
+      <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Schneller PIN-Unlock (optional, 4–6 Ziffern):</label>
+      <input type="password" id="setting-pin-code" class="search-input" placeholder="PIN leer lassen zum Deaktivieren" maxlength="6" style="margin-bottom: 8px;">
+
+      <div style="margin-bottom: 8px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.76rem; color: #d1d5db;">
+          <input type="checkbox" id="setting-auto-submit"> Formular nach Autofill automatisch absenden
+        </label>
+      </div>
+
+      <label style="font-size: 0.74rem; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Ausgeschlossene Domains (eine pro Zeile):</label>
+      <textarea id="setting-excluded-domains" class="search-input" rows="2" placeholder="beispiel.lokal&#10;test.intern" style="resize: vertical; font-family: monospace; font-size: 0.75rem; margin-bottom: 12px;"></textarea>
 
       <div style="display: flex; gap: 8px; margin-bottom: 8px;">
         <button type="button" class="btn btn-secondary" id="btn-test-connection" style="flex: 1; padding: 7px;">📶 Verbindung prüfen</button>
@@ -146,6 +167,15 @@
       <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">
         Melde dich direkt an oder übernimm deine Logins aus dem geöffneten Web-Tresor.
       </p>
+
+      <!-- PIN Unlock Box (shown when PIN is configured) -->
+      <div id="popup-pin-box" style="display: none; margin-bottom: 14px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px;">
+        <div style="font-weight: 600; font-size: 0.82rem; color: #93c5fd; margin-bottom: 6px;">⚡ Schneller PIN-Unlock</div>
+        <input type="password" id="popup-pin-input" class="search-input" placeholder="4-6 stelliger PIN" maxlength="6" style="text-align: center; font-size: 1.1rem; letter-spacing: 4px; margin-bottom: 8px;">
+        <button type="button" class="btn" id="btn-popup-pin-unlock" style="width: 100%; padding: 7px; margin-bottom: 6px;">Mit PIN entsperren</button>
+        <button type="button" class="btn btn-secondary" id="btn-popup-bio-unlock" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 0.76rem;">🖐️ Biometrisch / WebAuthn entsperren</button>
+        <a href="#" id="link-show-full-login" style="font-size: 0.72rem; color: #60a5fa; text-decoration: none; display: block; margin-top: 4px;">🔑 Stattdessen mit Master-Passwort anmelden</a>
+      </div>
 
       <form id="popup-login-form">
         <input type="text" id="popup-login-user" class="search-input" placeholder="Benutzername" required style="margin-bottom: 8px;">
@@ -182,7 +212,7 @@
     <div id="view-logins">
       <div class="search-container">
         <span class="search-icon">🔍</span>
-        <input type="text" id="ext-search" class="search-input has-icon" placeholder="Passwörter durchsuchen...">
+        <input type="text" id="ext-search" class="search-input has-icon" placeholder="Passwörter durchsuchen (Pfeiltasten + Enter)...">
       </div>
 
       <div class="domain-bar">
@@ -217,16 +247,35 @@
       <div class="generator-card">
         <div class="pwd-display" id="gen-pwd-output">••••••••••••••••</div>
 
-        <div class="gen-row">
-          <span>Länge: <strong id="gen-len-val">20</strong> Zeichen</span>
-          <input type="range" id="gen-len-slider" min="8" max="36" value="20" style="width: 140px; cursor: pointer;">
+        <div style="height: 4px; border-radius: 2px; background: #10b981; margin-bottom: 6px; transition: all 0.3s;" id="gen-entropy-bar"></div>
+        <div style="font-size: 0.72rem; color: #34d399; margin-bottom: 12px; text-align: right; font-weight: 600;" id="gen-entropy-text">~128 Bits Entropie (Sehr sicher 🟢)</div>
+
+        <div style="display: flex; gap: 6px; margin-bottom: 12px;">
+          <button type="button" class="btn btn-secondary active" id="btn-gen-mode-pwd" style="flex: 1; padding: 5px; font-size: 0.75rem;">🔑 Passwort</button>
+          <button type="button" class="btn btn-secondary" id="btn-gen-mode-passphrase" style="flex: 1; padding: 5px; font-size: 0.75rem;">💬 Passphrase (Wörter)</button>
         </div>
 
-        <div class="gen-options">
+        <div class="gen-row" id="row-gen-len">
+          <span>Länge: <strong id="gen-len-val">20</strong> Zeichen</span>
+          <input type="range" id="gen-len-slider" min="8" max="48" value="20" style="width: 140px; cursor: pointer;">
+        </div>
+
+        <div class="gen-row" id="row-gen-words" style="display: none;">
+          <span>Wortanzahl: <strong id="gen-words-val">4</strong> Wörter</span>
+          <input type="range" id="gen-words-slider" min="3" max="8" value="4" style="width: 140px; cursor: pointer;">
+        </div>
+
+        <div class="gen-options" id="gen-char-options">
           <label><input type="checkbox" id="gen-opt-upper" checked> Großbuchst. (A-Z)</label>
           <label><input type="checkbox" id="gen-opt-lower" checked> Kleinbuchst. (a-z)</label>
           <label><input type="checkbox" id="gen-opt-numbers" checked> Zahlen (0-9)</label>
           <label><input type="checkbox" id="gen-opt-symbols" checked> Symbole (!@#$)</label>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.76rem; color: #d1d5db;">
+            <input type="checkbox" id="gen-opt-ambiguous"> Ähnliche Zeichen meiden (1, l, I, 0, O)
+          </label>
         </div>
 
         <div style="display: flex; gap: 8px;">

@@ -26,6 +26,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 	r.Use(middleware.Compress(5))
 	r.Use(security.CORSMiddleware)
 	r.Use(security.SecurityHeadersMiddleware)
+	r.Use(security.TokenBucketMiddleware(security.NewTokenBucketLimiter(150, 30)))
 
 	// API Routes
 	r.Route("/api", func(api chi.Router) {
@@ -48,13 +49,33 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 					HTTPError(w, "Database connection unavailable", http.StatusServiceUnavailable)
 					return
 				}
+				var checkResult string
+				if err := database.QueryRow("PRAGMA quick_check(1)").Scan(&checkResult); err != nil || checkResult != "ok" {
+					HTTPError(w, "Database integrity check failed", http.StatusServiceUnavailable)
+					return
+				}
 			}
 			JSONResponse(w, map[string]string{
-				"status":   "ready",
-				"database": "connected",
-				"version":  "3.0.0",
+				"status":    "ready",
+				"database":  "connected",
+				"integrity": "verified",
+				"version":   "3.0.0",
 			}, http.StatusOK)
 		})
+
+		// Prometheus Metrics
+		api.Get("/metrics", HandlePrometheusMetrics(database))
+
+		// Server Time (for NTP Clock Drift Correction #67)
+		api.Get("/time", HandleServerTime())
+
+		// OpenAPI 3.1 & Interactive Docs (#48)
+		api.Get("/openapi.json", HandleOpenAPISpec())
+		api.Get("/docs", HandleSwaggerUI())
+
+		// Secure Send (Burn-after-reading)
+		api.Post("/send", HandleCreateSecureSend(database))
+		api.Get("/send/{sendId}", HandleGetSecureSend(database))
 
 		// Auth
 		api.Route("/auth", func(auth chi.Router) {
@@ -87,6 +108,8 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 			vault.Post("/items/{itemId}/restore", RequireAuth(HandleRestoreVaultItem(database)))
 			vault.Get("/trash", RequireAuth(HandleListTrashItems(database)))
 			vault.Delete("/trash", RequireAuth(HandleEmptyTrash(database)))
+			vault.Post("/re-encrypt", RequireAuth(HandleReencryptVault(database)))
+			vault.Get("/export-stream", RequireAuth(HandleStreamVaultExport(database)))
 		})
 
 		// Passkeys (FIDO2)
@@ -106,6 +129,10 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 		api.Get("/sync/settings", RequireAuth(HandleGetSyncSettings(database)))
 		api.Post("/sync/settings", RequireAuth(HandleSaveSyncSettings(database)))
 		api.Post("/sync/now", RequireAuth(HandleTriggerSyncNow))
+		api.Get("/sync/events", HandleSyncEvents(database))
+
+		// Self-Hosted Privacy Favicon Cache
+		api.Get("/favicon", HandleFaviconProxy())
 
 		// Aliases
 		api.Get("/aliases", RequireAuth(HandleListAliases(database)))
@@ -118,7 +145,28 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 		api.Post("/share/send", RequireAuth(HandleSendSharedItem(database)))
 		api.Get("/share/inbox", RequireAuth(HandleListSharedInbox(database)))
 		api.Delete("/share/inbox/{itemId}", RequireAuth(HandleDeleteSharedInboxItem(database)))
+
+		// Webhooks
+		api.Get("/webhooks", RequireAuth(HandleListWebhooks(database)))
+		api.Post("/webhooks", RequireAuth(HandleCreateWebhook(database)))
+		api.Delete("/webhooks/{hookId}", RequireAuth(HandleDeleteWebhook(database)))
+		api.Post("/webhooks/{hookId}/test", RequireAuth(HandleTestWebhook(database)))
+
+		// Team Vaults (#74, #75)
+		api.Get("/teams", RequireAuth(HandleListTeams(database)))
+		api.Post("/teams", RequireAuth(HandleCreateTeam(database)))
+
+		// Emergency Access Contacts (#72)
+		api.Get("/emergency/contacts", RequireAuth(HandleListEmergencyContacts(database)))
+		api.Post("/emergency/contacts", RequireAuth(HandleCreateEmergencyContact(database)))
+		api.Delete("/emergency/contacts/{contactId}", RequireAuth(HandleDeleteEmergencyContact(database)))
+
+		// Security Audit Logs (#78)
+		api.Get("/audit/logs", RequireAuth(HandleListAuditLogs(database)))
 	})
+
+	// Prometheus root metrics endpoint
+	r.Get("/metrics", HandlePrometheusMetrics(database))
 
 	// Static frontend: Use local disk if static/index.html exists (for live dev/customization),
 	// otherwise serve from compiled-in embedded assets (for 100% standalone single binary).

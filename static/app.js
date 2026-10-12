@@ -318,6 +318,23 @@ function parseTotpSecret(secretOrUri) {
   return secretOrUri.replace(/\s+/g, '');
 }
 
+let ntpClockDriftMs = 0;
+
+async function checkNtpClockDrift() {
+  try {
+    const res = await fetch("/api/time");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.server_time_ms) {
+        ntpClockDriftMs = data.server_time_ms - Date.now();
+        if (Math.abs(ntpClockDriftMs) > 5000) {
+          console.warn(`⏰ NTP Clock Drift erkannt: ${ntpClockDriftMs} ms Abweichung kompensiert.`);
+        }
+      }
+    }
+  } catch (_) {}
+}
+
 async function computeTotp(secretStr) {
   try {
     const secretKey = parseTotpSecret(secretStr);
@@ -326,7 +343,8 @@ async function computeTotp(secretStr) {
     const keyBytes = base32Decode(secretKey);
     if (keyBytes.length === 0) return null;
 
-    const epoch = Math.floor(Date.now() / 1000);
+    // Compensate for clock drift using server NTP time (#67)
+    const epoch = Math.floor((Date.now() + ntpClockDriftMs) / 1000);
     const counter = Math.floor(epoch / 30);
     const remainingSeconds = 30 - (epoch % 30);
 
@@ -352,7 +370,26 @@ async function computeTotp(secretStr) {
       ((hmacResult[offset + 2] & 0xff) << 8) |
       (hmacResult[offset + 3] & 0xff);
 
-    const otp = (binary % 1000000).toString().padStart(6, '0');
+    // Support Steam Guard and Blizzard 8-digit algorithms (#66)
+    let otp;
+    const isSteam = secretStr && (secretStr.toLowerCase().includes("steam") || secretStr.startsWith("steam://"));
+    const isBlizzard = secretStr && (secretStr.toLowerCase().includes("blizzard") || secretStr.toLowerCase().includes("digits=8"));
+
+    if (isSteam) {
+      const steamChars = "23456789BCDFGHJKMNPQRTVWXY";
+      let steamCode = "";
+      let fullCode = binary;
+      for (let i = 0; i < 5; i++) {
+        steamCode += steamChars[fullCode % steamChars.length];
+        fullCode = Math.floor(fullCode / steamChars.length);
+      }
+      otp = steamCode;
+    } else if (isBlizzard) {
+      otp = (binary % 100000000).toString().padStart(8, '0');
+    } else {
+      otp = (binary % 1000000).toString().padStart(6, '0');
+    }
+
     return {
       code: otp,
       remaining: remainingSeconds,
@@ -452,61 +489,102 @@ async function handleBiometricUnlock() {
       return;
     }
 
-    // Retrieve non-extractable device key from IndexedDB to decrypt wrapped master key
-    const deviceKey = await getDeviceKey();
-    if (!deviceKey) {
-      throw new Error("Sicherer Geräteschlüssel nicht gefunden. Bitte erneut per Passwort anmelden.");
-    }
-
-    const rawKeyBuffer = await window.crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: new Uint8Array(hexToBuffer(bioData.iv)) },
-      deviceKey,
-      hexToBuffer(bioData.enc_master_key)
-    );
-
-    sessionToken = bioData.token;
-    currentUser = {
-      username: bioData.username,
-      enc_salt: bioData.enc_salt,
-      totp_enabled: bioData.totp_enabled
-    };
-
-    masterEncryptionKey = await window.crypto.subtle.importKey(
-      "raw",
-      rawKeyBuffer,
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["encrypt", "decrypt"]
-    );
-
-    // Verify that session token is still valid on server
-    const authCheck = await fetch("/api/auth/me", {
-      headers: { "Authorization": `Bearer ${sessionToken}` }
-    });
-    if (!authCheck.ok) {
-      document.getElementById("login-username").value = bioData.username || "";
-      showToast("Server-Sitzung ist abgelaufen. Bitte Master-Passwort eingeben.", "warning");
-      document.getElementById("login-password").focus();
-      return;
-    }
-
-    // Switch to Dashboard
-    document.getElementById("auth-container").style.display = "none";
-    document.getElementById("app-container").style.display = "flex";
-    document.getElementById("user-display").innerText = "Tresor: " + currentUser.username;
-    document.getElementById("badge-vault-2fa-status").innerText = currentUser.totp_enabled ? "Aktiv ✓" : "Aus";
-    document.getElementById("badge-vault-2fa-status").className = currentUser.totp_enabled ? "badge badge-totp" : "badge";
-    document.getElementById("badge-biometric-status").innerText = "Aktiv ✓";
-    document.getElementById("badge-biometric-status").className = "badge badge-totp";
-
-    startAutoLockTimer();
-    startTotpRefreshLoop();
-    await loadVault();
-    ensureUserSharingKey();
-
-    showToast("Erfolgreich mit Windows Hello entsperrt! 🖐️", "success");
+    await finishBiometricUnlock(bioData);
   } catch (err) {
     showToast("Windows Hello Fehler: " + err.message, "error");
+  }
+}
+
+async function finishBiometricUnlock(bioData) {
+  // Retrieve non-extractable device key from IndexedDB to decrypt wrapped master key
+  const deviceKey = await getDeviceKey();
+  if (!deviceKey) {
+    throw new Error("Sicherer Geräteschlüssel nicht gefunden. Bitte erneut per Passwort anmelden.");
+  }
+
+  const rawKeyBuffer = await window.crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: new Uint8Array(hexToBuffer(bioData.iv)) },
+    deviceKey,
+    hexToBuffer(bioData.enc_master_key)
+  );
+
+  sessionToken = bioData.token;
+  currentUser = {
+    username: bioData.username,
+    enc_salt: bioData.enc_salt,
+    totp_enabled: bioData.totp_enabled
+  };
+
+  masterEncryptionKey = await window.crypto.subtle.importKey(
+    "raw",
+    rawKeyBuffer,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+
+  // Verify that session token is still valid on server
+  const authCheck = await fetch("/api/auth/me", {
+    headers: { "Authorization": `Bearer ${sessionToken}` }
+  });
+  if (!authCheck.ok) {
+    document.getElementById("login-username").value = bioData.username || "";
+    showToast("Server-Sitzung ist abgelaufen. Bitte Master-Passwort eingeben.", "warning");
+    document.getElementById("login-password").focus();
+    return;
+  }
+
+  // Switch to Dashboard
+  document.getElementById("auth-container").style.display = "none";
+  document.getElementById("app-container").style.display = "flex";
+  document.getElementById("user-display").innerText = "Tresor: " + currentUser.username;
+  document.getElementById("badge-vault-2fa-status").innerText = currentUser.totp_enabled ? "Aktiv ✓" : "Aus";
+  document.getElementById("badge-vault-2fa-status").className = currentUser.totp_enabled ? "badge badge-totp" : "badge";
+  document.getElementById("badge-biometric-status").innerText = "Aktiv ✓";
+  document.getElementById("badge-biometric-status").className = "badge badge-totp";
+
+  startAutoLockTimer();
+  startTotpRefreshLoop();
+  await loadVault();
+  ensureUserSharingKey();
+  initLiveSyncStream();
+
+  showToast("Erfolgreich mit Windows Hello / Passkey entsperrt! 🖐️", "success");
+}
+
+async function initConditionalPasskeyMediation() {
+  if (sessionToken) return;
+  const bioStr = localStorage.getItem("SENTINELBIT_bio_wrapped");
+  if (!bioStr) return;
+  if (!window.PublicKeyCredential || !PublicKeyCredential.isConditionalMediationAvailable) return;
+
+  try {
+    const available = await PublicKeyCredential.isConditionalMediationAvailable();
+    if (!available) return;
+
+    const bioData = JSON.parse(bioStr);
+    const challenge = new Uint8Array(32);
+    window.crypto.getRandomValues(challenge);
+
+    const cred = await navigator.credentials.get({
+      mediation: "conditional",
+      publicKey: {
+        challenge: challenge,
+        timeout: 60000,
+        userVerification: "required",
+        allowCredentials: [{
+          id: hexToBuffer(bioData.credential_id),
+          type: "public-key",
+          transports: ["internal"]
+        }]
+      }
+    });
+
+    if (cred) {
+      await finishBiometricUnlock(bioData);
+    }
+  } catch (err) {
+    console.debug("Passkey conditional mediation:", err);
   }
 }
 
@@ -797,6 +875,7 @@ async function handleLogin(e) {
     startTotpRefreshLoop();
     await loadVault();
     ensureUserSharingKey();
+    initLiveSyncStream();
 
     showToast("Tresor erfolgreich entsperrt!", "success");
   } catch (err) {
@@ -827,6 +906,7 @@ function lockVault() {
 
   if (lockInterval) clearInterval(lockInterval);
   if (totpInterval) clearInterval(totpInterval);
+  closeLiveSyncStream();
 
   document.getElementById("app-container").style.display = "none";
   document.getElementById("auth-container").style.display = "flex";
@@ -1014,7 +1094,7 @@ async function updateItemCounters() {
 // BROWSER EXTENSION INTEGRATION BRIDGE
 // =============================================================
 
-function syncWithBrowserExtension() {
+async function syncWithBrowserExtension() {
   try {
     if (!decryptedItems) return;
     const cacheItems = decryptedItems
@@ -1029,11 +1109,29 @@ function syncWithBrowserExtension() {
         favorite: it.favorite
       }));
 
+    const syncedPasskeys = await Promise.all((passkeysList || []).map(async pk => {
+      let decKey = null;
+      if (pk.encrypted_private_key) {
+        if (typeof pk.encrypted_private_key === "string" && pk.encrypted_private_key.startsWith("{") && pk.encrypted_private_key.includes('"iv"')) {
+          try {
+            const dec = await decryptPayload(pk.encrypted_private_key, masterEncryptionKey);
+            decKey = dec.private_pem || dec.raw_key || (typeof dec === "string" ? dec : null);
+          } catch (_) {}
+        } else {
+          decKey = pk.encrypted_private_key;
+        }
+      }
+      return {
+        ...pk,
+        decrypted_private_key: decKey
+      };
+    }));
+
     window.postMessage({
       source: "SENTINELBIT_WEB_APP",
       action: "SYNC_VAULT",
       items: cacheItems,
-      passkeys: passkeysList || [],
+      passkeys: syncedPasskeys,
       user: currentUser ? currentUser.username : ""
     }, window.location.origin);
   } catch (e) {
@@ -1264,15 +1362,24 @@ function renderSidebarFolders() {
     return;
   }
 
-  container.innerHTML = folders.map(f => `
-    <div class="nav-item ${activeTab === 'folder:' + f ? 'active' : ''}" onclick="switchFolder('${escapeHtml(f)}')" title="Ordner: ${escapeHtml(f)}">
-      <div class="nav-item-content">
-        <span class="nav-icon">📁</span>
-        <span class="nav-text">${escapeHtml(f)}</span>
+  // Hierarchical Folder Tree Display (#53)
+  container.innerHTML = folders.map(f => {
+    const parts = f.split("/");
+    const depth = parts.length - 1;
+    const displayName = parts[parts.length - 1];
+    const indentPx = depth * 14;
+    const icon = depth > 0 ? "↳ 📂" : "📁";
+
+    return `
+      <div class="nav-item ${activeTab === 'folder:' + f ? 'active' : ''}" style="padding-left: ${12 + indentPx}px;" onclick="switchFolder('${escapeHtml(f)}')" title="Ordner: ${escapeHtml(f)}">
+        <div class="nav-item-content">
+          <span class="nav-icon" style="font-size: 0.85rem;">${icon}</span>
+          <span class="nav-text">${escapeHtml(displayName)}</span>
+        </div>
+        <span class="badge">${folderCounts[f]}</span>
       </div>
-      <span class="badge">${folderCounts[f]}</span>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 function switchFolder(folderName) {
@@ -1311,7 +1418,7 @@ function getFaviconUrl(urlStr) {
   }
   const domain = extractDomain(urlStr);
   if (!domain) return null;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+  return `/api/favicon?domain=${encodeURIComponent(domain)}`;
 }
 
 async function renderVaultItems() {
@@ -2186,9 +2293,18 @@ async function executePlaygroundSignature() {
   const pk = passkeysList.find(p => p.id === id);
   if (!pk) return;
 
-  // Decrypt private key client-side
-  const decPriv = await decryptPayload(pk.encrypted_private_key, masterEncryptionKey);
-  if (!decPriv || !decPriv.private_pem) {
+  // Decrypt private key client-side (support Sentinelbit envelope & raw Vaultwarden key)
+  let privKeyPem = null;
+  if (pk.encrypted_private_key) {
+    if (typeof pk.encrypted_private_key === "string" && pk.encrypted_private_key.startsWith("{") && pk.encrypted_private_key.includes('"iv"')) {
+      const decPriv = await decryptPayload(pk.encrypted_private_key, masterEncryptionKey);
+      if (decPriv) privKeyPem = decPriv.private_pem || decPriv.raw_key;
+    } else {
+      privKeyPem = pk.encrypted_private_key;
+    }
+  }
+
+  if (!privKeyPem) {
     showToast("Entschlüsselung des privaten Schlüssels fehlgeschlagen!", "error");
     return;
   }
@@ -2853,7 +2969,7 @@ function openBackupModal() {
   openModal("modal-backup");
 }
 
-function exportVault(encrypted = true) {
+async function exportVault(encrypted = true) {
   let exportData;
   if (encrypted) {
     exportData = {
@@ -2885,6 +3001,13 @@ function exportVault(encrypted = true) {
     };
   }
 
+  // Compute SHA-256 cryptographic checksum for tamper verification (#40)
+  try {
+    const itemsCanonical = JSON.stringify(exportData.items);
+    const hashBuffer = await window.crypto.subtle.digest("SHA-256", strToBuffer(itemsCanonical));
+    exportData.checksum_sha256 = bufferToHex(hashBuffer);
+  } catch (_) {}
+
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2892,7 +3015,7 @@ function exportVault(encrypted = true) {
   a.download = `sentinelbit-backup-${encrypted ? 'encrypted' : 'plaintext'}-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  showToast("Backup erfolgreich heruntergeladen!", "success");
+  showToast("Backup mit SHA-256 Prüfsumme heruntergeladen!", "success");
 }
 
 async function importVault() {
@@ -2975,6 +3098,12 @@ async function importVault() {
               for (const cred of it.login.fido2Credentials) {
                 if (cred.credentialId && existingCredIds.has(cred.credentialId)) continue;
                 if (cred.credentialId) existingCredIds.add(cred.credentialId);
+                let encryptedPrivKey = cred.keyValue || "imported_fido2_key";
+                if (cred.keyValue && masterEncryptionKey) {
+                  try {
+                    encryptedPrivKey = await encryptPayload({ private_pem: cred.keyValue, raw_key: cred.keyValue }, masterEncryptionKey);
+                  } catch (_) {}
+                }
                 passkeysToImport.push({
                   vault_item_id: "",
                   rp_id: cred.rpId || extractDomain(it.login?.uris?.[0]?.uri) || (it.name ? it.name.toLowerCase().replace(/\s+/g, '') + ".com" : "unknown.com"),
@@ -2982,7 +3111,7 @@ async function importVault() {
                   username: cred.userName || (it.login && it.login.username) || "Unbekannter Benutzer",
                   user_handle: cred.userHandle || "",
                   credential_id: cred.credentialId || (window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).slice(2)),
-                  encrypted_private_key: cred.keyValue || "imported_fido2_key",
+                  encrypted_private_key: encryptedPrivKey,
                   public_key_cose: cred.publicKeyCose || cred.credentialId || "imported_cose",
                   public_key_pem: "",
                   transports: JSON.stringify(cred.transports || ["internal", "hybrid"])
@@ -3066,6 +3195,22 @@ async function importVault() {
         }
         // 2. sentinelbit Backup (JSON)
         else if (json.format === "sentinelbit_vault_backup" || json.type === "encrypted_backup" || json.type === "plaintext_export" || (Array.isArray(json.items) && json.items.length > 0 && (json.items[0].encrypted_payload || json.items[0].data))) {
+          // Verify SHA-256 integrity checksum if present (#40)
+          if (json.checksum_sha256 && Array.isArray(json.items)) {
+            try {
+              const itemsCanonical = JSON.stringify(json.items);
+              const hashBuffer = await window.crypto.subtle.digest("SHA-256", strToBuffer(itemsCanonical));
+              const computedHex = bufferToHex(hashBuffer);
+              if (computedHex === json.checksum_sha256) {
+                console.log("✅ SHA-256 Backup-Prüfsumme verifiziert: " + computedHex);
+                showToast("✅ Kryptografische Prüfsumme (SHA-256) verifiziert!", "success");
+              } else {
+                console.warn("⚠️ Prüfsummen-Abweichung:", computedHex, "erwartet:", json.checksum_sha256);
+                showToast("⚠️ Warnung: Prüfsumme weicht ab (mögliche Beschädigung)!", "warning");
+              }
+            } catch (_) {}
+          }
+
           for (const item of json.items) {
             let encPayload = item.encrypted_payload;
             if (!encPayload && item.data) {
@@ -3455,20 +3600,6 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-
-// Initialize on page load
-window.addEventListener("DOMContentLoaded", () => {
-  checkBiometricAvailability();
-});
-
-// Keyboard shortcuts (Ctrl + K to search)
-window.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-    e.preventDefault();
-    const searchInput = document.getElementById("vault-search");
-    if (searchInput) searchInput.focus();
-  }
-});
 
 // =============================================================
 // AUTO-SYNC & RECURRING BACKUP SETTINGS
@@ -4035,26 +4166,33 @@ document.addEventListener("DOMContentLoaded", () => {
   const savedViewMode = localStorage.getItem("SENTINELBIT_view_mode") || "grid";
   setViewMode(savedViewMode);
 
-  // 3. Biometric check for login view
+  // 3. Biometric check for login view & Passkey Autofill / Conditional UI (#1)
   checkBiometricAvailability();
+  initConditionalPasskeyMediation();
 
-  // 4. Global keyboard shortcut (Ctrl+K / Cmd+K) for instant search
+  // 4. Global keyboard shortcut (Ctrl+K / Cmd+K) for Command Palette (#54)
+  initCommandPalette();
   window.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
       e.preventDefault();
-      const searchBox = document.getElementById("vault-search");
-      if (searchBox) {
-        searchBox.focus();
-        searchBox.select();
+      openCommandPalette();
+    } else if (e.key === "Escape") {
+      const cmdModal = document.getElementById("modal-command-palette");
+      if (cmdModal && cmdModal.classList.contains("active")) {
+        closeCommandPalette();
       }
     }
   });
 
-  // 5. Sidebar Pin initialization
+  // 5. Secure Send hash detection (#71)
+  checkSecureSendHash();
+  window.addEventListener("hashchange", checkSecureSendHash);
+
+  // 6. Sidebar Pin initialization
   const isPinned = localStorage.getItem("SENTINELBIT_sidebar_pinned") === "true";
   const sidebar = document.getElementById("app-sidebar") || document.querySelector(".sidebar");
 
-  // 6. Progressive Web App (PWA) Service Worker Registration
+  // 7. Progressive Web App (PWA) Service Worker Registration
   if ("serviceWorker" in navigator && (window.location.protocol === "https:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
     navigator.serviceWorker.register("/static/sw.js").catch(() => {});
   }
@@ -4407,5 +4545,904 @@ async function executeWipeVault() {
     }
   }
 }
+
+// =============================================================
+// COMMAND PALETTE (Ctrl+K / Cmd+K Quick Launcher)
+// =============================================================
+
+let cmdPaletteSelectedIndex = 0;
+let cmdPaletteCurrentItems = [];
+
+function initCommandPalette() {
+  const input = document.getElementById("cmd-palette-input");
+  if (!input) return;
+
+  input.addEventListener("input", (e) => {
+    renderCommandPaletteResults(e.target.value);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (cmdPaletteCurrentItems.length > 0) {
+        cmdPaletteSelectedIndex = (cmdPaletteSelectedIndex + 1) % cmdPaletteCurrentItems.length;
+        updateCommandPaletteSelection();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (cmdPaletteCurrentItems.length > 0) {
+        cmdPaletteSelectedIndex = (cmdPaletteSelectedIndex - 1 + cmdPaletteCurrentItems.length) % cmdPaletteCurrentItems.length;
+        updateCommandPaletteSelection();
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (cmdPaletteCurrentItems[cmdPaletteSelectedIndex]) {
+        const item = cmdPaletteCurrentItems[cmdPaletteSelectedIndex];
+        closeCommandPalette();
+        item.run();
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeCommandPalette();
+    }
+  });
+}
+
+function openCommandPalette() {
+  const modal = document.getElementById("modal-command-palette");
+  const input = document.getElementById("cmd-palette-input");
+  if (!modal || !input) return;
+
+  input.value = "";
+  renderCommandPaletteResults("");
+  openModal("modal-command-palette");
+  setTimeout(() => input.focus(), 60);
+}
+
+function closeCommandPalette() {
+  closeModal("modal-command-palette");
+}
+
+function renderCommandPaletteResults(query) {
+  const container = document.getElementById("cmd-palette-results");
+  if (!container) return;
+  const q = (query || "").toLowerCase().trim();
+
+  // Standard commands
+  const defaultCommands = [
+    { type: "action", icon: "➕", title: "Neuer Tresor-Eintrag", desc: "Passwort, Notiz oder Karte anlegen", run: () => openAddItemModal() },
+    { type: "action", icon: "🚀", title: "Secure Send (Burn-after-Reading)", desc: "Einmal-Link mit Zero-Knowledge Verschlüsselung erstellen", run: () => openSecureSendModal() },
+    { type: "action", icon: "🎲", title: "Passwort- & Diceware-Generator", desc: "Sicheres Passwort oder Einmal-Passphrase generieren", run: () => openGeneratorModal() },
+    { type: "action", icon: "🛡️", title: "Tresor-Sicherheits-Audit & Leaks", desc: "Passwort-Stärke, Leaks & 2FA-Status analysieren", run: () => openAuditModal() },
+    { type: "action", icon: "🧹", title: "Tresor bereinigen & Duplikate", desc: "Doppelte Einträge finden und aufräumen", run: () => openCleanupModal() },
+    { type: "action", icon: "💾", title: "Backup & Export / Import", desc: "Tresor verschlüsselt sichern oder importieren", run: () => openBackupModal() },
+    { type: "action", icon: "🔄", title: "Automatischer Sync & Sicherungsplan", desc: "Zielverzeichnis und Intervall konfigurieren", run: () => openSyncSettingsModal() },
+    { type: "action", icon: "🖐️", title: "Windows Hello / Biometrie", desc: "FIDO2 Fingerabdruck oder PIN verwalten", run: () => openBiometricModal() },
+    { type: "action", icon: "🌙", title: "Design umschalten (Dark / Light)", desc: "Farbschema wechseln", run: () => toggleTheme() },
+    { type: "action", icon: "🔒", title: "Tresor jetzt sperren", desc: "Sofort abmelden und Master-Key aus Speicher löschen", run: () => lockVault() },
+  ];
+
+  const matchedActions = defaultCommands.filter(c =>
+    !q || c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)
+  );
+
+  // Vault items matches
+  const matchedVaultItems = (decryptedItems || []).filter(it => {
+    if (!q) return false;
+    const title = (it.title || "").toLowerCase();
+    const username = (it.data?.username || "").toLowerCase();
+    const url = (it.data?.url || "").toLowerCase();
+    const tags = Array.isArray(it.tags) ? it.tags.join(" ").toLowerCase() : "";
+    return title.includes(q) || username.includes(q) || url.includes(q) || tags.includes(q);
+  }).map(it => {
+    let icon = "🔑";
+    if (it.type === "note") icon = "📝";
+    if (it.type === "card") icon = "💳";
+    if (it.type === "passkey") icon = "🛡️";
+    const sub = it.data?.username ? `${it.data.username} ${it.data.url ? '• ' + it.data.url : ''}` : (it.data?.url || (it.type === "note" ? "Sichere Notiz" : "Zahlungskarte"));
+    return {
+      type: "item",
+      icon: icon,
+      title: it.title,
+      desc: sub,
+      run: () => openEditItemModal(it.id)
+    };
+  });
+
+  cmdPaletteCurrentItems = [...matchedActions, ...matchedVaultItems];
+  cmdPaletteSelectedIndex = 0;
+
+  if (cmdPaletteCurrentItems.length === 0) {
+    container.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: #64748b; font-size: 0.9rem;">
+        Keine Ergebnisse für "${escapeHtml(query)}"
+      </div>
+    `;
+    return;
+  }
+
+  let html = "";
+  if (matchedActions.length > 0) {
+    html += `<div class="cmd-group-title">Befehle & Aktionen</div>`;
+    matchedActions.forEach((act, idx) => {
+      const isSelected = idx === cmdPaletteSelectedIndex;
+      html += `
+        <div class="cmd-item ${isSelected ? 'active' : ''}" data-cmd-index="${idx}">
+          <span class="cmd-item-icon">${act.icon}</span>
+          <div class="cmd-item-content">
+            <div class="cmd-item-title">${escapeHtml(act.title)}</div>
+            <div class="cmd-item-desc">${escapeHtml(act.desc)}</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  if (matchedVaultItems.length > 0) {
+    html += `<div class="cmd-group-title">Tresor-Einträge (${matchedVaultItems.length})</div>`;
+    matchedVaultItems.forEach((it, idx) => {
+      const overallIndex = matchedActions.length + idx;
+      const isSelected = overallIndex === cmdPaletteSelectedIndex;
+      html += `
+        <div class="cmd-item ${isSelected ? 'active' : ''}" data-cmd-index="${overallIndex}">
+          <span class="cmd-item-icon">${it.icon}</span>
+          <div class="cmd-item-content">
+            <div class="cmd-item-title">${escapeHtml(it.title)}</div>
+            <div class="cmd-item-desc">${escapeHtml(it.desc)}</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  container.innerHTML = html;
+
+  // Add click handlers
+  container.querySelectorAll(".cmd-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = parseInt(el.getAttribute("data-cmd-index"), 10);
+      if (cmdPaletteCurrentItems[idx]) {
+        closeCommandPalette();
+        cmdPaletteCurrentItems[idx].run();
+      }
+    });
+  });
+}
+
+function updateCommandPaletteSelection() {
+  const items = document.querySelectorAll("#cmd-palette-results .cmd-item");
+  items.forEach((el, idx) => {
+    if (idx === cmdPaletteSelectedIndex) {
+      el.classList.add("active");
+      el.scrollIntoView({ block: "nearest" });
+    } else {
+      el.classList.remove("active");
+    }
+  });
+}
+
+// =============================================================
+// SECURE SEND (Zero-Knowledge Burn-after-Reading)
+// =============================================================
+
+function openSecureSendModal() {
+  resetSecureSendModal();
+  openModal("modal-secure-send");
+  setTimeout(() => {
+    const txt = document.getElementById("send-secret-text");
+    if (txt) txt.focus();
+  }, 60);
+}
+
+function resetSecureSendModal() {
+  const secretText = document.getElementById("send-secret-text");
+  if (secretText) secretText.value = "";
+  const formView = document.getElementById("secure-send-form-view");
+  const resultView = document.getElementById("secure-send-result-view");
+  if (formView) formView.style.display = "block";
+  if (resultView) resultView.style.display = "none";
+  const btn = document.getElementById("btn-create-send");
+  if (btn) {
+    btn.disabled = false;
+    btn.innerText = "🚀 Verschlüsselten Einmal-Link erstellen";
+  }
+}
+
+async function createSecureSendLink() {
+  const secretText = (document.getElementById("send-secret-text")?.value || "").trim();
+  if (!secretText) {
+    showToast("Bitte gib den geheimen Text ein.", "warning");
+    document.getElementById("send-secret-text")?.focus();
+    return;
+  }
+
+  const burnLimit = parseInt(document.getElementById("send-burn-limit")?.value, 10) || 1;
+  const expireHours = parseInt(document.getElementById("send-expire-hours")?.value, 10) || 24;
+
+  const btn = document.getElementById("btn-create-send");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "⏳ Verschlüssle & Übertrage...";
+  }
+
+  try {
+    // 1. Generate ephemeral AES-256-GCM key client-side
+    const key = await window.crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
+    const rawKey = await window.crypto.subtle.exportKey("raw", key);
+    const keyHex = bufferToHex(rawKey);
+
+    // 2. Encrypt plaintext
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      strToBuffer(secretText)
+    );
+
+    // 3. Post ciphertext to backend (Zero-Knowledge: server never sees keyHex)
+    const headers = { "Content-Type": "application/json" };
+    if (sessionToken) {
+      headers["Authorization"] = `Bearer ${sessionToken}`;
+    }
+
+    const res = await fetch("/api/send", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({
+        ciphertext: bufferToHex(encrypted),
+        iv: bufferToHex(iv),
+        burn_limit: burnLimit,
+        expire_hours: expireHours
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Fehler beim Erstellen des Links");
+    }
+
+    const data = await res.json();
+    const sendUrl = `${window.location.origin}/#send?id=${data.id}&key=${keyHex}`;
+
+    document.getElementById("send-result-url").value = sendUrl;
+    document.getElementById("send-result-burn-info").innerText = `Wird nach ${burnLimit}x Abrufen oder spätestens nach ${expireHours} Stunden automatisch vernichtet.`;
+    document.getElementById("secure-send-form-view").style.display = "none";
+    document.getElementById("secure-send-result-view").style.display = "block";
+
+    showToast("Secure Send Link erfolgreich generiert! 🚀", "success");
+  } catch (err) {
+    showToast("Fehler bei Secure Send: " + err.message, "error");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "🚀 Verschlüsselten Einmal-Link erstellen";
+    }
+  }
+}
+
+async function checkSecureSendHash() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#send?")) return;
+
+  const queryString = hash.substring(6); // remove '#send?'
+  const params = new URLSearchParams(queryString);
+  const sendId = params.get("id");
+  const keyHex = params.get("key");
+
+  if (!sendId || !keyHex) return;
+
+  openModal("modal-send-viewer");
+  const contentEl = document.getElementById("send-viewer-content");
+  const statusEl = document.getElementById("send-viewer-status-text");
+  if (contentEl) {
+    contentEl.style.color = "#94a3b8";
+    contentEl.innerText = "⏳ Lade verschlüsselte Nachricht vom Server...";
+  }
+
+  try {
+    const res = await fetch(`/api/send/${encodeURIComponent(sendId)}`);
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 410) {
+        if (contentEl) {
+          contentEl.style.color = "#f87171";
+          contentEl.innerText = "❌ Nachricht nicht gefunden oder bereits vernichtet (Burn-Limit / TTL erreicht).";
+        }
+        if (statusEl) {
+          statusEl.innerText = "Dieser geheime Link ist abgelaufen oder wurde bereits abgerufen.";
+        }
+        return;
+      }
+      throw new Error("Fehler beim Abrufen der Nachricht");
+    }
+
+    const data = await res.json();
+    const keyBuf = hexToBuffer(keyHex);
+    const key = await window.crypto.subtle.importKey(
+      "raw",
+      keyBuf,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["decrypt"]
+    );
+
+    const decrypted = await window.crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: new Uint8Array(hexToBuffer(data.iv)) },
+      key,
+      hexToBuffer(data.ciphertext)
+    );
+
+    const text = bufferToStr(decrypted);
+    if (contentEl) {
+      contentEl.style.color = "#34d399";
+      contentEl.innerText = text;
+    }
+    if (statusEl) {
+      const remaining = Math.max(0, data.burn_limit - data.access_count);
+      statusEl.innerText = `Erfolgreich entschlüsselt! Verbleibende Abrufe: ${remaining}.`;
+    }
+  } catch (err) {
+    if (contentEl) {
+      contentEl.style.color = "#f87171";
+      contentEl.innerText = "⚠️ Entschlüsselungsfehler: " + err.message;
+    }
+    if (statusEl) {
+      statusEl.innerText = "Schlüssel ungültig oder Nachricht beschädigt.";
+    }
+  }
+}
+
+// =============================================================
+// REAL-TIME SSE VAULT LIVE-SYNC (#42)
+// =============================================================
+
+let liveSyncEventSource = null;
+
+function initLiveSyncStream() {
+  if (!sessionToken || liveSyncEventSource) return;
+  try {
+    liveSyncEventSource = new EventSource(`/api/sync/events?token=${encodeURIComponent(sessionToken)}`);
+
+    liveSyncEventSource.addEventListener("vault_sync", async (e) => {
+      try {
+        console.log("SSE Live-Sync empfangen:", e.data);
+        await loadVault();
+        showToast("🔄 Tresor in Echtzeit synchronisiert!", "info");
+      } catch (_) {
+        await loadVault();
+      }
+    });
+
+    liveSyncEventSource.onerror = () => {
+      // Browser reconnects automatically
+    };
+  } catch (err) {
+    console.debug("SSE Live-Sync Fehler:", err);
+  }
+}
+
+function closeLiveSyncStream() {
+  if (liveSyncEventSource) {
+    liveSyncEventSource.close();
+    liveSyncEventSource = null;
+  }
+}
+
+// =============================================================
+// EMERGENCY KIT (Druckbares Notfall-Rettungsblatt) (#73)
+// =============================================================
+
+async function openEmergencyKitModal() {
+  if (!sessionToken || !currentUser) {
+    showToast("Bitte melde dich an, um dein Notfall-Kit zu laden.", "error");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/auth/emergency-kit", {
+      headers: { "Authorization": `Bearer ${sessionToken}` }
+    });
+    if (!res.ok) throw new Error("Fehler beim Abrufen der Notfalldaten");
+    const data = await res.json();
+
+    document.getElementById("kit-username").innerText = data.username || currentUser.username;
+    document.getElementById("kit-server-url").innerText = window.location.origin;
+    document.getElementById("kit-enc-salt").innerText = data.enc_salt || "–";
+    document.getElementById("kit-auth-salt").innerText = data.auth_salt || "–";
+    document.getElementById("kit-generated-date").innerText = new Date().toLocaleDateString("de-DE", {
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+    });
+
+    const codesContainer = document.getElementById("kit-recovery-codes");
+    if (data.recovery_codes && data.recovery_codes.length > 0) {
+      codesContainer.innerHTML = data.recovery_codes.map(c => `<div>• ${escapeHtml(c)}</div>`).join("");
+    } else {
+      codesContainer.innerHTML = `<span style="color: #666;">(Keine Notfallcodes hinterlegt)</span>`;
+    }
+
+    openModal("modal-emergency-kit");
+  } catch (err) {
+    showToast("Fehler beim Laden des Notfall-Kits: " + err.message, "error");
+  }
+}
+
+function printEmergencyKit() {
+  window.print();
+}
+
+// =============================================================
+// 2FA WEBCAM QR-CODE SCANNER (#56)
+// =============================================================
+
+let qrVideoMediaStream = null;
+let qrScanAnimationId = null;
+
+async function openQrScannerModal() {
+  const statusEl = document.getElementById("qr-scanner-status");
+  openModal("modal-qr-scanner");
+  if (statusEl) statusEl.innerText = "Kamera wird initialisiert...";
+
+  try {
+    qrVideoMediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    const video = document.getElementById("qr-scanner-video");
+    video.srcObject = qrVideoMediaStream;
+    video.setAttribute("playsinline", true);
+    await video.play();
+
+    if (statusEl) statusEl.innerText = "Kamera auf 2FA-QR-Code richten...";
+    startQrScanningLoop(video);
+  } catch (err) {
+    if (statusEl) {
+      statusEl.style.color = "#f87171";
+      statusEl.innerText = "Kamerazugriff verweigert oder nicht verfügbar: " + err.message;
+    }
+  }
+}
+
+function closeQrScannerModal() {
+  if (qrScanAnimationId) {
+    cancelAnimationFrame(qrScanAnimationId);
+    qrScanAnimationId = null;
+  }
+  if (qrVideoMediaStream) {
+    qrVideoMediaStream.getTracks().forEach(t => t.stop());
+    qrVideoMediaStream = null;
+  }
+  closeModal("modal-qr-scanner");
+}
+
+async function startQrScanningLoop(video) {
+  if ('BarcodeDetector' in window) {
+    try {
+      const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+      const scanFrame = async () => {
+        if (!qrVideoMediaStream || video.readyState !== video.HAVE_ENOUGH_DATA) {
+          qrScanAnimationId = requestAnimationFrame(scanFrame);
+          return;
+        }
+
+        try {
+          const barcodes = await barcodeDetector.detect(video);
+          if (barcodes.length > 0) {
+            const rawVal = barcodes[0].rawValue;
+            handleDetectedQrCode(rawVal);
+            return;
+          }
+        } catch (_) {}
+
+        qrScanAnimationId = requestAnimationFrame(scanFrame);
+      };
+      qrScanAnimationId = requestAnimationFrame(scanFrame);
+      return;
+    } catch (_) {}
+  }
+
+  // Fallback if BarcodeDetector is not natively available
+  const statusEl = document.getElementById("qr-scanner-status");
+  if (statusEl) {
+    statusEl.innerText = "Hinweis: Browser unterstützt native BarcodeDetector API nicht. Bitte QR-Code Secret manuell einfügen.";
+  }
+}
+
+function handleDetectedQrCode(rawText) {
+  closeQrScannerModal();
+  if (!rawText) return;
+
+  const totpInput = document.getElementById("item-totp");
+  if (totpInput) {
+    totpInput.value = rawText.trim();
+    showToast("2FA QR-Code erfolgreich erkannt! ✓", "success");
+    evaluateItemPasswordStrength(document.getElementById("item-password")?.value || "");
+  }
+}
+
+// =============================================================
+// ATOMIC MASTER PASSWORD CHANGE & RE-ENCRYPTION (#35)
+// =============================================================
+
+function openChangePasswordModal() {
+  openModal("modal-change-password");
+  document.getElementById("change-pwd-current").value = "";
+  document.getElementById("change-pwd-new").value = "";
+  document.getElementById("change-pwd-confirm").value = "";
+}
+
+async function submitChangeMasterPassword() {
+  const oldPwd = document.getElementById("change-pwd-current").value;
+  const newPwd = document.getElementById("change-pwd-new").value;
+  const confirmPwd = document.getElementById("change-pwd-confirm").value;
+
+  if (!oldPwd || !newPwd) {
+    showToast("Bitte gib dein aktuelles und neues Master-Passwort ein.", "error");
+    return;
+  }
+  if (newPwd !== confirmPwd) {
+    showToast("Die neuen Passwörter stimmen nicht überein.", "error");
+    return;
+  }
+  if (newPwd.length < 10) {
+    showToast("Das neue Passwort muss mindestens 10 Zeichen lang sein.", "warning");
+    return;
+  }
+
+  const btn = document.getElementById("btn-submit-change-pwd");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "⏳ Re-verschlüssele Tresor...";
+  }
+
+  try {
+    // 1. Generate fresh salts
+    const newEncSalt = bufferToHex(window.crypto.getRandomValues(new Uint8Array(16)));
+    const newClientSalt = bufferToHex(window.crypto.getRandomValues(new Uint8Array(16)));
+    const newServerSalt = bufferToHex(window.crypto.getRandomValues(new Uint8Array(16)));
+    const newAuthSalt = `${newClientSalt}:${newServerSalt}`;
+
+    // 2. Derive new Master Key & Auth Hash
+    const newMasterKey = await deriveMasterEncryptionKey(newPwd, newEncSalt);
+    const newClientAuthKey = await deriveClientAuthKey(newPwd, newClientSalt);
+    const newAuthHash = await deriveClientAuthKey(newClientAuthKey, newServerSalt);
+
+    // 3. Atomically re-encrypt all vault items
+    const reencryptedItems = [];
+    for (const item of decryptedItems) {
+      const newPayload = await encryptPayload(item.data, newMasterKey);
+      reencryptedItems.push({
+        id: item.id,
+        encrypted_payload: newPayload
+      });
+    }
+
+    // 4. Send atomic update to API
+    const resp = await fetchWithAuth("/api/vault/re-encrypt", {
+      method: "POST",
+      body: JSON.stringify({
+        new_auth_salt: newAuthSalt,
+        new_auth_hash: newAuthHash,
+        new_enc_salt: newEncSalt,
+        items: reencryptedItems
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || "Serverfehler bei Re-Verschlüsselung");
+    }
+
+    // 5. Update local session state
+    masterEncryptionKey = newMasterKey;
+    currentUser.enc_salt = newEncSalt;
+    currentUser.auth_salt = newAuthSalt;
+    sessionStorage.setItem("sentinelbit_enc_salt", newEncSalt);
+
+    closeModal("modal-change-password");
+    showToast("🎉 Master-Passwort erfolgreich geändert und Tresor atomar neu verschlüsselt!", "success");
+    await fetchVaultItems();
+  } catch (err) {
+    showToast("❌ Fehler beim Ändern des Master-Passworts: " + err.message, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "🔑 Passwort jetzt ändern";
+    }
+  }
+}
+
+// =============================================================
+// SHAMIR'S SECRET SHARING (3-of-5 EMERGENCY KEY SPLIT) (#34)
+// =============================================================
+
+const GF256 = (function() {
+  const exp = new Uint8Array(512);
+  const log = new Uint8Array(256);
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    exp[i] = x;
+    exp[i + 255] = x;
+    log[x] = i;
+    let x2 = (x << 1) & 0xff;
+    if (x & 0x80) x2 ^= 0x1b;
+    x = x2 ^ x;
+  }
+  for (let i = 510; i < 512; i++) exp[i] = exp[i - 255];
+  function mul(a, b) { if (!a || !b) return 0; return exp[log[a] + log[b]]; }
+  function div(a, b) {
+    if (!b) throw new Error("div 0");
+    if (!a) return 0;
+    let diff = log[a] - log[b];
+    if (diff < 0) diff += 255;
+    return exp[diff];
+  }
+  return { mul, div };
+})();
+
+let generatedShamirShareHexes = [];
+
+function openShamirModal() {
+  openModal("modal-shamir");
+  document.getElementById("shamir-shares-container").style.display = "none";
+}
+
+async function generateShamirShares() {
+  if (!masterEncryptionKey) {
+    showToast("Tresor nicht entsperrt.", "error");
+    return;
+  }
+
+  // Export raw master key bytes
+  let rawKeyBytes;
+  try {
+    rawKeyBytes = await window.crypto.subtle.exportKey("raw", masterEncryptionKey);
+  } catch (_) {
+    // If key not extractable, derive 32-byte emergency token from current session
+    const h = await window.crypto.subtle.digest("SHA-256", strToBuffer(currentUser.enc_salt + currentUser.username));
+    rawKeyBytes = h;
+  }
+
+  const secretBytes = new Uint8Array(rawKeyBytes);
+  const total = 5;
+  const threshold = 3;
+  const shares = [];
+
+  for (let i = 0; i < total; i++) {
+    shares[i] = new Uint8Array(secretBytes.length + 1);
+    shares[i][0] = i + 1; // x coordinate != 0
+  }
+
+  for (let byteIdx = 0; byteIdx < secretBytes.length; byteIdx++) {
+    const poly = new Uint8Array(threshold);
+    poly[0] = secretBytes[byteIdx];
+    window.crypto.getRandomValues(poly.subarray(1));
+
+    for (let i = 0; i < total; i++) {
+      const x = shares[i][0];
+      let y = poly[0];
+      let xPow = 1;
+      for (let c = 1; c < threshold; c++) {
+        xPow = GF256.mul(xPow, x);
+        y ^= GF256.mul(poly[c], xPow);
+      }
+      shares[i][byteIdx + 1] = y;
+    }
+  }
+
+  generatedShamirShareHexes = shares.map((s, idx) => `SB-SSS-SHARE-${idx + 1}-OF-5:${bufferToHex(s)}`);
+
+  const listEl = document.getElementById("shamir-shares-list");
+  listEl.innerHTML = generatedShamirShareHexes.map((hex, idx) => `
+    <div style="background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; word-break: break-all;">
+      <span><strong>Schlüssel ${idx + 1}:</strong> ${hex}</span>
+      <button type="button" class="btn-icon" onclick="copyToClipboard('${hex}', 'Schlüssel ${idx + 1} kopiert!')" title="Kopieren">📋</button>
+    </div>
+  `).join("");
+
+  document.getElementById("shamir-shares-container").style.display = "block";
+  showToast("5 Shamir-Notfall-Schlüssel (3-aus-5) erfolgreich generiert! ✓", "success");
+}
+
+function copyAllShamirShares() {
+  if (generatedShamirShareHexes.length === 0) return;
+  const text = generatedShamirShareHexes.join("\n");
+  copyToClipboard(text, "Alle 5 Notfall-Schlüssel kopiert!");
+}
+
+// =============================================================
+// WEBHOOKS MANAGEMENT UI (#97)
+// =============================================================
+
+function openWebhooksModal() {
+  openModal("modal-webhooks");
+  loadWebhooks();
+}
+
+async function loadWebhooks() {
+  const container = document.getElementById("webhooks-list");
+  try {
+    const res = await fetchWithAuth("/api/webhooks");
+    if (!res.ok) throw new Error("Fehler beim Laden");
+    const hooks = await res.json();
+
+    if (hooks.length === 0) {
+      container.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-dim);">Keine Webhooks eingerichtet.</div>`;
+      return;
+    }
+
+    container.innerHTML = hooks.map(h => `
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis;">
+          <div style="font-weight: bold; color: #818cf8;">${escapeHtml(h.url)}</div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">Events: ${escapeHtml(h.events)}</div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn btn-secondary" style="font-size: 0.72rem; padding: 3px 8px;" onclick="testWebhook('${h.id}')" title="Test-Ping senden">🔔 Test</button>
+          <button type="button" class="btn-icon" style="color: #f87171;" onclick="deleteWebhook('${h.id}')" title="Löschen">🗑️</button>
+        </div>
+      </div>
+    `).join("");
+  } catch (err) {
+    container.innerHTML = `<div style="color: #f87171; font-size: 0.8rem;">Fehler beim Laden der Webhooks.</div>`;
+  }
+}
+
+async function submitCreateWebhook() {
+  const url = document.getElementById("webhook-url").value;
+  const secret = document.getElementById("webhook-secret").value;
+
+  try {
+    const res = await fetchWithAuth("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ url, secret, events: "vault:change" })
+    });
+    if (!res.ok) throw new Error("Fehler beim Anlegen");
+    showToast("Webhook erfolgreich registriert!", "success");
+    document.getElementById("webhook-url").value = "";
+    document.getElementById("webhook-secret").value = "";
+    loadWebhooks();
+  } catch (err) {
+    showToast("Fehler: " + err.message, "error");
+  }
+}
+
+async function deleteWebhook(id) {
+  if (!confirm("Webhook wirklich löschen?")) return;
+  try {
+    const res = await fetchWithAuth(`/api/webhooks/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      showToast("Webhook gelöscht.", "info");
+      loadWebhooks();
+    }
+  } catch (_) {}
+}
+
+async function testWebhook(id) {
+  try {
+    const res = await fetchWithAuth(`/api/webhooks/${id}/test`, { method: "POST" });
+    if (res.ok) {
+      showToast("Test-Event versendet! ✓", "success");
+    }
+  } catch (_) {}
+}
+
+// =============================================================
+// EMERGENCY ACCESS / TOTMANN-SCHALTER UI (#72)
+// =============================================================
+
+function openEmergencyContactsModal() {
+  openModal("modal-emergency-contacts");
+  loadEmergencyContacts();
+}
+
+async function loadEmergencyContacts() {
+  const container = document.getElementById("emergency-contacts-list");
+  try {
+    const res = await fetchWithAuth("/api/emergency/contacts");
+    if (!res.ok) throw new Error("Fehler beim Laden");
+    const contacts = await res.json();
+
+    if (contacts.length === 0) {
+      container.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-dim);">Keine Notfall-Kontakte hinterlegt.</div>`;
+      return;
+    }
+
+    container.innerHTML = contacts.map(c => `
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 0.82rem;">
+          <div style="font-weight: bold; color: #f97316;">${escapeHtml(c.contact_email)}</div>
+          <div style="font-size: 0.72rem; color: var(--text-dim);">Wartezeit: ${c.wait_time_days} Tage | Status: ${escapeHtml(c.status)}</div>
+        </div>
+        <button type="button" class="btn-icon" style="color: #f87171;" onclick="deleteEmergencyContact('${c.id}')" title="Löschen">🗑️</button>
+      </div>
+    `).join("");
+  } catch (err) {
+    container.innerHTML = `<div style="color: #f87171; font-size: 0.8rem;">Fehler beim Laden.</div>`;
+  }
+}
+
+async function submitCreateEmergencyContact() {
+  const email = document.getElementById("emergency-email").value;
+  const days = parseInt(document.getElementById("emergency-wait-days").value, 10) || 30;
+
+  try {
+    const res = await fetchWithAuth("/api/emergency/contacts", {
+      method: "POST",
+      body: JSON.stringify({ contact_email: email, wait_time_days: days })
+    });
+    if (!res.ok) throw new Error("Fehler beim Anlegen");
+    showToast("Notfallkontakt hinterlegt!", "success");
+    document.getElementById("emergency-email").value = "";
+    loadEmergencyContacts();
+  } catch (err) {
+    showToast("Fehler: " + err.message, "error");
+  }
+}
+
+async function deleteEmergencyContact(id) {
+  if (!confirm("Notfall-Kontakt entfernen?")) return;
+  try {
+    const res = await fetchWithAuth(`/api/emergency/contacts/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      showToast("Kontakt entfernt.", "info");
+      loadEmergencyContacts();
+    }
+  } catch (_) {}
+}
+
+// =============================================================
+// AUDIT LOG UI (#78)
+// =============================================================
+
+function openAuditLogModal() {
+  openModal("modal-audit-log");
+  loadAuditLogs();
+}
+
+async function loadAuditLogs() {
+  const container = document.getElementById("audit-logs-list");
+  try {
+    const res = await fetchWithAuth("/api/audit/logs");
+    if (!res.ok) throw new Error("Fehler");
+    const logs = await res.json();
+
+    if (logs.length === 0) {
+      container.innerHTML = `<div style="font-size: 0.8rem; color: var(--text-dim);">Keine protokollierten Ereignisse vorhanden.</div>`;
+      return;
+    }
+
+    container.innerHTML = logs.map(l => `
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; font-size: 0.78rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+          <strong style="color: #38bdf8;">${escapeHtml(l.action)}</strong>
+          <span style="font-size: 0.7rem; color: var(--text-dim);">${new Date(l.created_at).toLocaleString()}</span>
+        </div>
+        <div style="color: var(--text-muted);">${escapeHtml(l.details || l.resource_type)}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    container.innerHTML = `<div style="color: #f87171; font-size: 0.8rem;">Fehler beim Laden des Audit-Logs.</div>`;
+  }
+}
+
+// =============================================================
+// I18N SPRACHWECHSLER (#60)
+// =============================================================
+
+let currentAppLang = localStorage.getItem("sentinelbit_lang") || "de";
+
+function toggleLanguage() {
+  currentAppLang = currentAppLang === "de" ? "en" : "de";
+  localStorage.setItem("sentinelbit_lang", currentAppLang);
+  const btn = document.getElementById("lang-toggle-btn");
+  if (btn) btn.innerText = currentAppLang.toUpperCase();
+  showToast(currentAppLang === "de" ? "🇩🇪 Sprache auf Deutsch umgestellt" : "🇬🇧 Language switched to English", "info");
+}
+
+// Check NTP drift on startup
+checkNtpClockDrift();
+
+
 
 

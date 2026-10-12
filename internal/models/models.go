@@ -151,3 +151,25 @@ type SessionData struct {
 	Username  string
 	ExpiresAt time.Time
 }
+
+// Secure Send Models (Burn-after-reading)
+type SecureSendCreateRequest struct {
+	EncryptedPayload string `json:"encrypted_payload"`
+	BurnLimit        int    `json:"burn_limit"`
+	ExpireHours      int    `json:"expire_hours"`
+}
+
+type SecureSendResponse struct {
+	ID        string `json:"id"`
+	ExpiresAt string `json:"expires_at"`
+	BurnLimit int    `json:"burn_limit"`
+	ViewCount int    `json:"view_count"`
+}
+
+type SecureSendRetrieveResponse struct {
+	ID               string `json:"id"`
+	EncryptedPayload string `json:"encrypted_payload"`
+	BurnLimit        int    `json:"burn_limit"`
+	ViewCount        int    `json:"view_count"`
+	RemainingViews   int    `json:"remaining_views"`
+}

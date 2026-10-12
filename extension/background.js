@@ -39,6 +39,13 @@ chrome.runtime.onInstalled.addListener(() => {
       });
 
       chrome.contextMenus.create({
+        id: "sentinelbit_open_sidepanel",
+        parentId: "sentinelbit_root",
+        title: "🪟 In Seitenleiste öffnen",
+        contexts: ["all"]
+      });
+
+      chrome.contextMenus.create({
         id: "sentinelbit_open_vault",
         parentId: "sentinelbit_root",
         title: "🌐 Web-Tresor öffnen",
@@ -53,6 +60,20 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("sentinelbit_autolock_check", { periodInMinutes: 1 });
 });
 
+// Auto-lock when system is locked or user becomes idle (#20)
+if (chrome.idle) {
+  chrome.idle.onStateChanged.addListener((newState) => {
+    if (newState === "locked") {
+      if (chrome.storage.session) {
+        chrome.storage.session.clear();
+      }
+      chrome.storage.local.set({ last_active_time: 0 });
+      chrome.action.setBadgeText({ text: "" });
+      console.log("SentinelBit: Vault automatically locked on OS lock.");
+    }
+  });
+}
+
 // =============================================================
 // 2. CONTEXT MENU ACTIONS
 // =============================================================
@@ -61,6 +82,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "sentinelbit_autofill") {
     if (tab && tab.id) {
       autofillTab(tab);
+    }
+  } else if (info.menuItemId === "sentinelbit_open_sidepanel") {
+    if (chrome.sidePanel && tab && tab.id) {
+      chrome.sidePanel.open({ tabId: tab.id });
     }
   } else if (info.menuItemId === "sentinelbit_open_vault") {
     chrome.storage.local.get(["server_url"], (res) => {
@@ -287,6 +312,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         console.debug("sentinelbit: Auto-locked vault after inactivity");
       }
     }
+  } else if (alarm.name === "sentinelbit_clipboard_clear") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: "CLEAR_CLIPBOARD" }, () => {});
+      }
+    });
   }
 });
 
@@ -320,19 +351,89 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "TOUCH_ACTIVITY") {
     chrome.storage.local.set({ last_active_time: Date.now() });
     sendResponse({ status: "ok" });
+  } else if (request.action === "OPEN_SIDEPANEL") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id && chrome.sidePanel) {
+        chrome.sidePanel.open({ tabId: tabs[0].id });
+      }
+    });
+    sendResponse({ status: "ok" });
+  } else if (request.action === "SCHEDULE_CLIPBOARD_CLEAR") {
+    const sec = parseInt(request.seconds, 10) || 30;
+    chrome.alarms.create("sentinelbit_clipboard_clear", { delayInMinutes: Math.max(0.1, sec / 60) });
+    sendResponse({ status: "scheduled" });
   } else if (request.action === "GET_MATCHING_LOGINS") {
-    getSessionData().then(session => {
+    const hostname = extractDomain(request.url || "");
+    chrome.storage.local.get(["excluded_domains"], async (loc) => {
+      const exclusions = (loc.excluded_domains || "").split("\n").map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (hostname && exclusions.some(ex => hostname === ex || hostname.endsWith("." + ex))) {
+        sendResponse({ matches: [], passkeys: [], isExcluded: true });
+        return;
+      }
+      const session = await getSessionData();
       const items = session.vault_cache || [];
       const passkeys = session.vault_passkeys || [];
-      const hostname = extractDomain(request.url || "");
       const matches = items.filter(it => matchesDomain(it, hostname));
       const matchingPasskeys = passkeys.filter(pk => matchesDomain({ url: pk.rp_id, title: pk.rp_name }, hostname));
       sendResponse({
         matches,
         passkeys: matchingPasskeys,
         totalItems: items.length,
-        totalPasskeys: passkeys.length
+        totalPasskeys: passkeys.length,
+        isExcluded: false
       });
+    });
+    return true;
+  } else if (request.action === "WEBAUTHN_GET_MATCHES") {
+    const rpId = (request.rpId || "").toLowerCase();
+    const allowCreds = request.allowCredentials || [];
+    getSessionData().then((session) => {
+      const passkeys = session.vault_passkeys || [];
+      let matches = passkeys.filter(pk => {
+        const pkRp = (pk.rp_id || "").toLowerCase();
+        return pkRp === rpId || rpId.endsWith("." + pkRp) || pkRp.endsWith("." + rpId) || matchesDomain({ url: pk.rp_id, title: pk.rp_name }, rpId);
+      });
+
+      if (allowCreds.length > 0) {
+        const credIdSet = new Set(allowCreds.map(c => c.id));
+        const exactMatches = matches.filter(pk => credIdSet.has(pk.credential_id));
+        if (exactMatches.length > 0) {
+          matches = exactMatches;
+        }
+      }
+
+      sendResponse({
+        status: matches.length > 0 ? "ok" : "no_passkey",
+        passkeys: matches
+      });
+    });
+    return true;
+  } else if (request.action === "WEBAUTHN_SAVE_PASSKEY") {
+    const pk = request.passkey;
+    chrome.storage.local.get(["server_url"], async (loc) => {
+      const serverUrl = loc.server_url || "http://127.0.0.1:8000";
+      const session = await getSessionData();
+      const currentPks = session.vault_passkeys || [];
+      currentPks.push(pk);
+      if (chrome.storage.session) {
+        await chrome.storage.session.set({ vault_passkeys: currentPks });
+      }
+      const token = session.vault_token || "";
+      if (token) {
+        try {
+          await fetch(`${serverUrl}/api/passkeys`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify(pk)
+          });
+        } catch (e) {
+          console.warn("Could not sync new passkey to server:", e);
+        }
+      }
+      sendResponse({ status: "ok" });
     });
     return true;
   }

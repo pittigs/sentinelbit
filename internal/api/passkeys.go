@@ -128,6 +128,7 @@ func HandleSavePasskey(db *sql.DB) http.HandlerFunc {
 		}
 
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		Broker.Broadcast(user.UserId, "passkey_saved", pkId)
 
 		JSONResponse(w, map[string]string{
 			"status":  "ok",
@@ -143,6 +144,7 @@ func HandleDeletePasskey(db *sql.DB) http.HandlerFunc {
 		pkId := chi.URLParam(r, "passkeyId")
 		_, _ = db.Exec("DELETE FROM passkeys WHERE id = ? AND user_id = ?", pkId, user.UserId)
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		Broker.Broadcast(user.UserId, "passkey_deleted", pkId)
 		JSONResponse(w, map[string]string{"status": "ok", "message": "Passkey gelöscht"}, http.StatusOK)
 	}
 }

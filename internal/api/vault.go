@@ -98,6 +98,7 @@ func HandleCreateVaultItem(db *sql.DB) http.HandlerFunc {
 		}
 
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_item_created", itemId)
 
 		JSONResponse(w, models.VaultItemResponse{
 			ID:               itemId,
@@ -170,6 +171,7 @@ func HandleBatchCreateVaultItems(db *sql.DB) http.HandlerFunc {
 
 		// Trigger backup ONCE after the entire batch is committed
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_batch_created", inserted)
 
 		JSONResponse(w, map[string]interface{}{
 			"inserted": inserted,
@@ -234,6 +236,7 @@ func HandleUpdateVaultItem(db *sql.DB) http.HandlerFunc {
 		}
 
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_item_updated", itemId)
 
 		JSONResponse(w, models.VaultItemResponse{
 			ID:               itemId,
@@ -265,12 +268,14 @@ func HandleDeleteVaultItem(db *sql.DB) http.HandlerFunc {
 			_, _ = db.Exec("DELETE FROM vault_items WHERE id = ? AND user_id = ?", itemId, user.UserId)
 			_, _ = db.Exec("DELETE FROM passkeys WHERE vault_item_id = ? AND user_id = ?", itemId, user.UserId)
 			_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+			broadcastVaultEvent(db, user.UserId, "vault_item_deleted", itemId)
 			JSONResponse(w, map[string]string{"status": "ok", "message": "Eintrag endgültig gelöscht"}, http.StatusOK)
 		} else {
 			now := time.Now().UTC().Format(time.RFC3339)
 			_, _ = db.Exec("UPDATE vault_items SET deleted_at = ? WHERE id = ? AND user_id = ?", now, itemId, user.UserId)
 			_, _ = db.Exec("UPDATE passkeys SET deleted_at = ? WHERE vault_item_id = ? AND user_id = ?", now, itemId, user.UserId)
 			_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+			broadcastVaultEvent(db, user.UserId, "vault_item_trashed", itemId)
 			JSONResponse(w, map[string]string{"status": "ok", "message": "Eintrag in den Papierkorb verschoben"}, http.StatusOK)
 		}
 	}
@@ -284,6 +289,7 @@ func HandleRestoreVaultItem(db *sql.DB) http.HandlerFunc {
 		_, _ = db.Exec("UPDATE vault_items SET deleted_at = NULL WHERE id = ? AND user_id = ?", itemId, user.UserId)
 		_, _ = db.Exec("UPDATE passkeys SET deleted_at = NULL WHERE vault_item_id = ? AND user_id = ?", itemId, user.UserId)
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_item_restored", itemId)
 		JSONResponse(w, map[string]string{"status": "ok", "message": "Eintrag aus dem Papierkorb wiederhergestellt"}, http.StatusOK)
 	}
 }
@@ -294,6 +300,7 @@ func HandleEmptyTrash(db *sql.DB) http.HandlerFunc {
 		_, _ = db.Exec("DELETE FROM vault_items WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", user.UserId)
 		_, _ = db.Exec("DELETE FROM passkeys WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at != ''", user.UserId)
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_trash_emptied", nil)
 		JSONResponse(w, map[string]string{"status": "ok", "message": "Papierkorb vollständig geleert"}, http.StatusOK)
 	}
 }
@@ -308,6 +315,102 @@ func HandleClearVault(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_cleared", nil)
 		JSONResponse(w, map[string]string{"status": "ok", "message": "Tresor wurde vollständig geleert"}, http.StatusOK)
 	}
 }
+
+func broadcastVaultEvent(database *sql.DB, userID, event string, payload interface{}) {
+	Broker.Broadcast(userID, event, payload)
+	jsonBytes, _ := json.Marshal(map[string]interface{}{
+		"event":     event,
+		"payload":   payload,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+	DispatchWebhooks(database, userID, event, string(jsonBytes))
+}
+
+type ReencryptItemPayload struct {
+	ID               string `json:"id"`
+	EncryptedPayload string `json:"encrypted_payload"`
+}
+
+type ReencryptVaultRequest struct {
+	NewAuthSalt string                 `json:"new_auth_salt"`
+	NewAuthHash string                 `json:"new_auth_hash"`
+	NewEncSalt  string                 `json:"new_enc_salt"`
+	Items       []ReencryptItemPayload `json:"items"`
+}
+
+// HandleReencryptVault atomically updates user master password salts and all encrypted items
+func HandleReencryptVault(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserFromCtx(r)
+		var req ReencryptVaultRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			HTTPError(w, "Ungültige Anfrage", http.StatusBadRequest)
+			return
+		}
+
+		if req.NewAuthSalt == "" || req.NewAuthHash == "" || req.NewEncSalt == "" {
+			HTTPError(w, "Fehlende Schlüsselparameter", http.StatusBadRequest)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			HTTPError(w, "Transaktionsfehler: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		// 1. Update user salts & auth hash
+		_, err = tx.Exec(`
+			UPDATE users
+			SET auth_salt = ?, auth_hash = ?, enc_salt = ?
+			WHERE id = ?
+		`, req.NewAuthSalt, req.NewAuthHash, req.NewEncSalt, user.UserId)
+		if err != nil {
+			HTTPError(w, "Fehler beim Aktualisieren des Benutzers", http.StatusInternalServerError)
+			return
+		}
+
+		// 2. Update active sessions enc_salt
+		_, _ = tx.Exec("UPDATE sessions SET enc_salt = ? WHERE user_id = ?", req.NewEncSalt, user.UserId)
+
+		// 3. Update all re-encrypted vault items
+		itemStmt, err := tx.Prepare("UPDATE vault_items SET encrypted_payload = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+		if err != nil {
+			HTTPError(w, "Fehler beim Vorbereiten des Item-Statements", http.StatusInternalServerError)
+			return
+		}
+		defer itemStmt.Close()
+
+		nowIso := time.Now().UTC().Format(time.RFC3339)
+		for _, it := range req.Items {
+			_, err = itemStmt.Exec(it.EncryptedPayload, nowIso, it.ID, user.UserId)
+			if err != nil {
+				HTTPError(w, "Fehler beim Aktualisieren der Tresor-Einträge", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			HTTPError(w, "Commit-Fehler: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Trigger backup & broadcast event
+		_, _ = backup.Engine.ExecuteBackup(user.UserId, true)
+		broadcastVaultEvent(db, user.UserId, "vault_reencrypted", map[string]interface{}{
+			"count": len(req.Items),
+		})
+
+		JSONResponse(w, map[string]interface{}{
+			"status":  "ok",
+			"message": "Tresor erfolgreich atomar neu verschlüsselt",
+			"count":   len(req.Items),
+		}, http.StatusOK)
+	}
+}
+

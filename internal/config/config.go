@@ -12,6 +12,8 @@ type Config struct {
 	DataDir             string
 	DisableRegistration bool
 	LogLevel            string
+	ForwardAuthEnabled  bool
+	ForwardAuthHeader   string
 }
 
 // Load reads configuration from environment variables with sensible defaults
@@ -44,11 +46,21 @@ func Load() *Config {
 		logLevel = "info"
 	}
 
+	faEnv := os.Getenv("SENTINELBIT_FORWARD_AUTH_ENABLED")
+	forwardAuthEnabled := strings.EqualFold(faEnv, "true") || faEnv == "1"
+
+	faHeader := os.Getenv("SENTINELBIT_FORWARD_AUTH_HEADER")
+	if faHeader == "" {
+		faHeader = "X-Remote-User"
+	}
+
 	return &Config{
 		Port:                port,
 		Host:                host,
 		DataDir:             dataDir,
 		DisableRegistration: disableRegistration,
 		LogLevel:            logLevel,
+		ForwardAuthEnabled:  forwardAuthEnabled,
+		ForwardAuthHeader:   faHeader,
 	}
 }
