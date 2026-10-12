@@ -57,9 +57,13 @@
     }
   }
 
-  function toArrayBuffer(uint8) {
-    if (!uint8 || uint8.length === 0) return new ArrayBuffer(0);
-    return uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength);
+  function toArrayBuffer(bufOrView) {
+    if (!bufOrView) return new ArrayBuffer(0);
+    if (bufOrView instanceof ArrayBuffer) return bufOrView;
+    if (ArrayBuffer.isView(bufOrView)) {
+      return bufOrView.buffer.slice(bufOrView.byteOffset, bufOrView.byteOffset + bufOrView.byteLength);
+    }
+    return new ArrayBuffer(0);
   }
 
   // Ensure Platform Authenticator feature discovery passes
@@ -177,17 +181,21 @@
                     return bufferToBase64Url(matchBytes);
                   } catch (_) {}
                 }
-                return s.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+                return s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
               }
 
-              const targetNorm = normHexOrB64(assertionData.id);
-              const matched = pk.allowCredentials.find(c => {
-                return normHexOrB64(c.id) === targetNorm;
-              }) || (pk.allowCredentials.length === 1 ? pk.allowCredentials[0] : null);
+              try {
+                const targetNorm = normHexOrB64(assertionData.id);
+                const matched = pk.allowCredentials.find(c => {
+                  return normHexOrB64(c.id) === targetNorm;
+                }) || (pk.allowCredentials.length === 1 ? pk.allowCredentials[0] : null);
 
-              if (matched && matched.id) {
-                rawIdBuf = toArrayBuffer(matched.id);
-                idB64Url = bufferToBase64Url(matched.id);
+                if (matched && matched.id) {
+                  rawIdBuf = toArrayBuffer(matched.id);
+                  idB64Url = bufferToBase64Url(matched.id);
+                }
+              } catch (matchErr) {
+                console.warn("[sentinelbit] allowCredentials matching non-fatal error:", matchErr);
               }
             }
 
