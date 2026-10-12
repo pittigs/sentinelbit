@@ -2025,6 +2025,21 @@ async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
 
   const privateKey = await importEcdsaPrivateKey(privateKeyMaterial);
 
+  // Derive canonical Relying Party ID:
+  // Prefer passkey.rp_id from vault, or strip www. prefix from origin hostname
+  let targetRpId = (passkey.rp_id || rpId || window.location.hostname || "").toLowerCase().trim();
+  if (targetRpId.startsWith("www.")) {
+    targetRpId = targetRpId.replace(/^www\./, "");
+  }
+  if (passkey.rp_id) {
+    const pkRp = passkey.rp_id.toLowerCase().trim().replace(/^www\./, "");
+    if (targetRpId === pkRp || targetRpId.endsWith("." + pkRp)) {
+      targetRpId = pkRp;
+    }
+  }
+
+  console.log("[sentinelbit] signWebAuthnAssertion using canonical rpId:", targetRpId);
+
   const clientData = {
     type: "webauthn.get",
     challenge: challengeB64,
@@ -2034,15 +2049,17 @@ async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
   const clientDataJSON = new TextEncoder().encode(JSON.stringify(clientData));
   const clientDataHash = await crypto.subtle.digest("SHA-256", clientDataJSON);
 
-  const rpIdHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rpId));
+  const rpIdHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(targetRpId));
   const authData = new Uint8Array(37);
   authData.set(new Uint8Array(rpIdHash), 0);
-  authData[32] = 0x05; // User Present (0x01) | User Verified (0x04)
-  const count = (passkey.sign_count || 0) + 1;
-  authData[33] = (count >> 24) & 0xff;
-  authData[34] = (count >> 16) & 0xff;
-  authData[35] = (count >> 8) & 0xff;
-  authData[36] = count & 0xff;
+  // Set flags: UP (0x01) | UV (0x04) | BE (0x08) | BS (0x10) = 0x1d (Multi-Device Synced Passkey)
+  authData[32] = 0x1d;
+  // According to FIDO2 / W3C WebAuthn L3 specification, multi-device synced passkeys MUST
+  // set signature counter to 0 so Relying Parties skip cloned authenticator counter checks
+  authData[33] = 0;
+  authData[34] = 0;
+  authData[35] = 0;
+  authData[36] = 0;
 
   const dataToSign = new Uint8Array(authData.length + 32);
   dataToSign.set(authData, 0);

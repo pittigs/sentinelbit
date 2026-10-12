@@ -156,8 +156,40 @@
             const authDataBuf = toArrayBuffer(authDataBytes);
             const sigBuf = toArrayBuffer(sigBytes);
             const userHandleBuf = userHandleBytes && userHandleBytes.length > 0 ? toArrayBuffer(userHandleBytes) : null;
-            const rawIdBuf = toArrayBuffer(rawIdBytes);
-            const idB64Url = bufferToBase64Url(rawIdBytes) || assertionData.id;
+            let rawIdBuf = toArrayBuffer(rawIdBytes);
+            let idB64Url = bufferToBase64Url(rawIdBytes) || assertionData.id;
+
+            // If the Relying Party provided allowCredentials in options, match the exact credential
+            // descriptor so rawId is bit-for-bit identical to what the server requested
+            if (pk.allowCredentials && pk.allowCredentials.length > 0) {
+              function normHexOrB64(bufOrStr) {
+                if (!bufOrStr) return "";
+                if (bufOrStr instanceof ArrayBuffer || bufOrStr instanceof Uint8Array || ArrayBuffer.isView(bufOrStr)) {
+                  return bufferToBase64Url(bufOrStr);
+                }
+                const s = String(bufOrStr).trim();
+                if (s.length >= 32 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)) {
+                  try {
+                    const matchBytes = new Uint8Array(s.length / 2);
+                    for (let i = 0; i < s.length; i += 2) {
+                      matchBytes[i / 2] = parseInt(s.substr(i, 2), 16);
+                    }
+                    return bufferToBase64Url(matchBytes);
+                  } catch (_) {}
+                }
+                return s.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+              }
+
+              const targetNorm = normHexOrB64(assertionData.id);
+              const matched = pk.allowCredentials.find(c => {
+                return normHexOrB64(c.id) === targetNorm;
+              }) || (pk.allowCredentials.length === 1 ? pk.allowCredentials[0] : null);
+
+              if (matched && matched.id) {
+                rawIdBuf = toArrayBuffer(matched.id);
+                idB64Url = bufferToBase64Url(matched.id);
+              }
+            }
 
             // Construct AuthenticatorAssertionResponse with own property descriptors
             // to shadow WebIDL getters and prevent Illegal invocation errors

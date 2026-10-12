@@ -404,7 +404,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       function normId(s) {
-        return (s || "").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        if (!s) return "";
+        const str = String(s).trim();
+        if (str.length >= 32 && str.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(str)) {
+          try {
+            let binary = "";
+            for (let i = 0; i < str.length; i += 2) {
+              binary += String.fromCharCode(parseInt(str.substr(i, 2), 16));
+            }
+            return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+          } catch (_) {}
+        }
+        return str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
       }
 
       let matches = passkeys.filter(pk => {
