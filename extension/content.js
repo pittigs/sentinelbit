@@ -1651,6 +1651,10 @@ async function handleWebAuthnGetRequest(requestId, options) {
     rpId: rpId,
     allowCredentials: allowCredentials
   }, async (response) => {
+    if (response && response.status === "locked") {
+      showInPageNotification("🔒 Sentinelbit ist gesperrt: Bitte Erweiterung entsperren", "🔒", 4000);
+    }
+
     if (chrome.runtime.lastError || !response || response.status !== "ok" || !response.passkeys || response.passkeys.length === 0) {
       window.postMessage({
         source: "SENTINELBIT_CONTENT_WEBAUTHN",

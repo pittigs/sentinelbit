@@ -385,18 +385,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   } else if (request.action === "WEBAUTHN_GET_MATCHES") {
-    const rpId = (request.rpId || "").toLowerCase();
+    const rpId = (request.rpId || "").toLowerCase().trim();
     const allowCreds = request.allowCredentials || [];
     getSessionData().then((session) => {
       const passkeys = session.vault_passkeys || [];
+      const cache = session.vault_cache || [];
+
+      // Check if vault is locked
+      if (passkeys.length === 0 && cache.length === 0) {
+        chrome.storage.local.get(["vault_user"], (loc) => {
+          if (loc && loc.vault_user) {
+            sendResponse({ status: "locked", passkeys: [] });
+          } else {
+            sendResponse({ status: "no_passkey", passkeys: [] });
+          }
+        });
+        return;
+      }
+
+      function normId(s) {
+        return (s || "").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
+
       let matches = passkeys.filter(pk => {
-        const pkRp = (pk.rp_id || "").toLowerCase();
+        const pkRp = (extractDomain(pk.rp_id || "") || (pk.rp_id || "")).toLowerCase().trim();
         return pkRp === rpId || rpId.endsWith("." + pkRp) || pkRp.endsWith("." + rpId) || matchesDomain({ url: pk.rp_id, title: pk.rp_name }, rpId);
       });
 
       if (allowCreds.length > 0) {
-        const credIdSet = new Set(allowCreds.map(c => c.id));
-        const exactMatches = matches.filter(pk => credIdSet.has(pk.credential_id));
+        const credIdSet = new Set(allowCreds.map(c => normId(c.id)));
+        const exactMatches = matches.filter(pk => credIdSet.has(normId(pk.credential_id)));
         if (exactMatches.length > 0) {
           matches = exactMatches;
         }
