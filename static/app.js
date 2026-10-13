@@ -1460,6 +1460,16 @@ function getFaviconUrl(urlStr) {
   return `/api/favicon?domain=${encodeURIComponent(domain)}`;
 }
 
+function handleFaviconError(imgEl, iconType = 'login') {
+  if (!imgEl) return;
+  imgEl.onerror = null;
+  const parent = imgEl.parentElement;
+  if (!parent) return;
+  parent.style.background = iconType === 'passkey' ? 'rgba(139, 92, 246, 0.15)' : '';
+  const svg = SVG_ICONS[iconType] || SVG_ICONS.login;
+  parent.innerHTML = svg;
+}
+
 
 async function renderVaultItems() {
   const container = document.getElementById("items-container");
@@ -1604,7 +1614,7 @@ async function renderVaultItems() {
       if (fav) {
         iconHtml = `
           <div class="card-icon" style="background: transparent;">
-            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML=\`${iconSvg.replace(/`/g, '\\`')}\`;">
+            <img class="card-favicon" src="${fav}" alt="" onerror="handleFaviconError(this, '${item.type || 'login'}')">
           </div>
         `;
       }
@@ -1752,7 +1762,7 @@ function renderPasskeyCards(passkeys) {
       if (fav) {
         pkIconHtml = `
           <div class="card-icon passkey" style="background: rgba(139, 92, 246, 0.1);">
-            <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML=\`${SVG_ICONS.passkey.replace(/`/g, '\\`')}\`;">
+            <img class="card-favicon" src="${fav}" alt="" onerror="handleFaviconError(this, 'passkey')">
           </div>
         `;
       }

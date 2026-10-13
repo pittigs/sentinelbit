@@ -81,6 +81,7 @@ h1, h2, h3, h4 {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  flex-shrink: 0;
 }
 
 .badge-passkey {
@@ -1127,7 +1128,7 @@ h1, h2, h3, h4 {
 }
 
 .items-grid:not(.list-mode) .card-main-col {
-  padding-right: 110px; /* Space for top-right actions */
+  padding-right: 125px; /* Space for top-right actions (3 buttons + margin) */
 }
 
 .items-grid:not(.list-mode) .card-actions-col {
