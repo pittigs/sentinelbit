@@ -1295,7 +1295,11 @@ function openAchievementsModal() {
       <div style="flex-grow: 1;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <h4 style="font-size: 0.95rem; color: ${isUnlocked ? '#34d399' : 'var(--text-main)'};">${ach.title}</h4>
-          <span class="badge ${isUnlocked ? 'badge-totp' : ''}">${isUnlocked ? 'Freigeschaltet ✓' : 'Gesperrt 🔒'}</span>
+          <span class="badge ${isUnlocked ? 'badge-totp' : ''}" style="display: inline-flex; align-items: center; gap: 4px;">
+            ${isUnlocked 
+              ? `<svg viewBox="0 0 24 24" style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2.5;"><polyline points="20 6 9 17 4 12"/></svg> Freigeschaltet` 
+              : `<svg viewBox="0 0 24 24" style="width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Gesperrt`}
+          </span>
         </div>
         <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">${ach.desc}</p>
       </div>
@@ -1708,9 +1712,9 @@ async function renderVaultItems() {
         ${iconHtml}
         <div class="card-title-group">
           <div class="card-title" title="${escapeHtml(item.title)}">
-            ${escapeHtml(item.title)}
-            ${item.folder ? `<span class="badge" style="font-size: 0.68rem; margin-left: 6px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500; display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.folder}</span> ${escapeHtml(item.folder)}</span>` : ''}
-            ${matchingPk ? `<span class="badge badge-passkey" style="font-size: 0.68rem; margin-left: 6px; padding: 2px 6px; display: inline-flex; align-items: center; gap: 3px;" title="Passkey (FIDO2) hinterlegt"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>` : ''}
+            <span class="card-title-text">${escapeHtml(item.title)}</span>
+            ${item.folder ? `<span class="badge" style="font-size: 0.68rem; background: rgba(255,255,255,0.06); color: var(--text-muted); font-weight: 500; display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.folder}</span> ${escapeHtml(item.folder)}</span>` : ''}
+            ${matchingPk ? `<span class="badge badge-passkey" style="font-size: 0.68rem; padding: 2px 6px; display: inline-flex; align-items: center; gap: 3px;" title="Passkey (FIDO2) hinterlegt"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>` : ''}
           </div>
           <div class="card-subtitle" title="${escapeHtml(item.data.url || item.folder || '')}">${escapeHtml(item.data.url || item.folder || 'Keine URL')}</div>
         </div>
@@ -1739,15 +1743,15 @@ function renderPasskeyCards(passkeys) {
   const container = document.getElementById("items-container");
   for (const pk of passkeys) {
     const card = document.createElement("div");
-    card.className = "vault-card";
+    card.className = "vault-card passkey-card";
     card.style.border = "1px solid rgba(139, 92, 246, 0.35)";
 
-    let pkIconHtml = `<div class="card-icon passkey">${SVG_ICONS.passkey}</div>`;
+    let pkIconHtml = `<div class="card-icon passkey" style="color: #a78bfa; background: rgba(139, 92, 246, 0.15);">${SVG_ICONS.passkey}</div>`;
     if (pk.rp_id) {
       const fav = getFaviconUrl(pk.rp_id);
       if (fav) {
         pkIconHtml = `
-          <div class="card-icon passkey" style="background: transparent;">
+          <div class="card-icon passkey" style="background: rgba(139, 92, 246, 0.1);">
             <img class="card-favicon" src="${fav}" alt="" onerror="this.onerror=null; this.parentElement.innerHTML=\`${SVG_ICONS.passkey.replace(/`/g, '\\`')}\`;">
           </div>
         `;
@@ -1755,32 +1759,33 @@ function renderPasskeyCards(passkeys) {
     }
 
     card.innerHTML = `
-      <div class="card-header">
-        <div style="display: flex; gap: 12px; align-items: center; overflow: hidden;">
-          ${pkIconHtml}
-          <div class="card-title-group">
-            <div class="card-title" style="color: #c4b5fd;">${escapeHtml(pk.rp_name)}</div>
-            <div class="card-subtitle">${escapeHtml(pk.rp_id)}</div>
+      <div class="card-main-col">
+        ${pkIconHtml}
+        <div class="card-title-group">
+          <div class="card-title" title="${escapeHtml(pk.rp_name)}">
+            <span class="card-title-text" style="color: #c4b5fd;">${escapeHtml(pk.rp_name)}</span>
+            <span class="badge badge-passkey" style="display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>
           </div>
+          <div class="card-subtitle" title="${escapeHtml(pk.rp_id)}">${escapeHtml(pk.rp_id)}</div>
         </div>
-        <span class="badge badge-passkey" style="display: inline-flex; align-items: center; gap: 3px;"><span style="width: 11px; height: 11px; display: inline-flex;">${SVG_ICONS.passkey}</span> FIDO2</span>
       </div>
 
-      <div class="card-row">
-        <span style="color: var(--text-dim); font-size: 0.8rem;">Benutzer:</span>
-        <span class="card-row-value" style="color: #c4b5fd;">${escapeHtml(pk.username)}</span>
+      <div class="card-creds-col">
+        <div class="card-field-col card-field-user">
+          <span class="card-field-label">Benutzer:</span>
+          <span class="card-field-val" style="color: #c4b5fd;">${escapeHtml(pk.username)}</span>
+        </div>
+        <div class="card-field-col card-field-pwd">
+          <span class="card-field-label">Credential ID:</span>
+          <span class="card-field-val" style="color: #60a5fa; font-size: 0.75rem;">${escapeHtml(pk.credential_id.substring(0, 16))}...</span>
+        </div>
       </div>
 
-      <div class="card-row">
-        <span style="color: var(--text-dim); font-size: 0.8rem;">Credential ID:</span>
-        <span class="card-row-value" style="font-size: 0.75rem; color: #60a5fa;">${escapeHtml(pk.credential_id.substring(0, 16))}...</span>
-      </div>
-
-      <div style="display: flex; gap: 8px; margin-top: 4px;">
-        <button class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" onclick="testPasskeyAssertion('${pk.id}')">
+      <div class="card-actions-col">
+        <button class="btn btn-secondary passkey-test-btn" onclick="testPasskeyAssertion('${pk.id}')" title="WebAuthn Simulation">
           ${SVG_ICONS.test} WebAuthn Testen
         </button>
-        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; justify-content: center;" onclick="deletePasskey('${pk.id}')" title="Passkey löschen">
+        <button class="btn-icon" onclick="deletePasskey('${pk.id}')" title="Passkey löschen" style="color: #f87171;">
           ${SVG_ICONS.trash}
         </button>
       </div>
@@ -3584,14 +3589,20 @@ function closeModal(modalId) {
 
 function showToast(message, type = "info") {
   const container = document.getElementById("toast-container");
+  if (!container) return;
   const toast = document.createElement("div");
-  toast.className = "toast";
+  toast.className = `toast toast-${type}`;
 
-  let icon = "ℹ️";
-  if (type === "success") icon = "✓";
-  if (type === "error") icon = "⚠️";
+  let iconSvg = `<svg viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: #38bdf8; fill: none; stroke-width: 2.2;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+  if (type === "success") {
+    iconSvg = `<svg viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: #34d399; fill: none; stroke-width: 2.5;"><polyline points="20 6 9 17 4 12"/></svg>`;
+  } else if (type === "error" || type === "danger") {
+    iconSvg = `<svg viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: #f87171; fill: none; stroke-width: 2.2;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+  } else if (type === "warning") {
+    iconSvg = `<svg viewBox="0 0 24 24" style="width: 16px; height: 16px; stroke: #fbbf24; fill: none; stroke-width: 2.2;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+  }
 
-  toast.innerHTML = `<span style="font-weight: bold;">${icon}</span><span>${escapeHtml(message)}</span>`;
+  toast.innerHTML = `<span class="toast-icon">${iconSvg}</span><span>${escapeHtml(message)}</span>`;
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -3887,7 +3898,7 @@ async function loadSharedInbox() {
           <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 4px;" onclick="importSharedInboxByIndex(${idx})">
             ${SVG_ICONS.archive} Importieren
           </button>
-          <button class="btn-icon" onclick="deleteSharedInboxItem('${it.id}')" title="Ablehnen" style="color: #f87171;">✕</button>
+          <button class="btn-icon" onclick="deleteSharedInboxItem('${it.id}')" title="Ablehnen" style="color: #f87171;">${SVG_ICONS.trash}</button>
         </div>
       `;
       container.appendChild(card);

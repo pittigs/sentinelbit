@@ -340,26 +340,28 @@
 
         <div class="top-actions">
           <!-- Language Toggle (DE / EN) (#60) -->
-          <button class="btn btn-secondary" id="lang-toggle-btn" onclick="toggleLanguage()" title="Sprache wechseln / Switch Language" style="font-size: 0.75rem; font-weight: bold; padding: 6px 10px;">
+          <button class="top-btn" id="lang-toggle-btn" onclick="toggleLanguage()" title="Sprache wechseln / Switch Language">
             DE
           </button>
           <!-- Dark/Light Theme Toggle -->
-          <button class="btn btn-secondary" id="theme-toggle-btn" onclick="toggleTheme()" title="Design umschalten (Dunkel / Hell)">
-            <svg viewBox="0 0 24 24" style="width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <button class="top-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Design umschalten (Dunkel / Hell)">
+            <svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
           <!-- Grid vs List View Toggle -->
-          <button class="view-toggle-btn active" id="btn-view-grid" onclick="setViewMode('grid')" title="Kachelansicht">
-            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          </button>
-          <button class="view-toggle-btn" id="btn-view-list" onclick="setViewMode('list')" title="Kompakte Listenansicht">
-            <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-          </button>
+          <div class="view-toggle-group">
+            <button class="view-toggle-btn active" id="btn-view-grid" onclick="setViewMode('grid')" title="Kachelansicht">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
+            <button class="view-toggle-btn" id="btn-view-list" onclick="setViewMode('list')" title="Kompakte Listenansicht">
+              <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
 
           <button class="btn btn-passkey" onclick="openAddPasskeyModal()">
-            <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Passkey erstellen
+            <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> <span>Passkey erstellen</span>
           </button>
           <button class="btn btn-primary" onclick="openAddItemModal()">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Neuer Eintrag
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> <span>Neuer Eintrag</span>
           </button>
         </div>
       </header>
@@ -444,8 +446,16 @@
   <div class="modal-overlay" id="modal-item">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3 id="modal-item-title">Neuer Tresor-Eintrag</h3>
-        <button class="btn-icon" onclick="closeModal('modal-item')">✕</button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="modal-header-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+            <svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-2-2l2 2m0 0l-7.5 7.5a5 5 0 1 0 2.8 2.8L21 4v2h2V2h-2z"/></svg>
+          </span>
+          <div>
+            <h3 id="modal-item-title">Neuer Tresor-Eintrag</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);" id="modal-item-subtitle">Zero-Knowledge verschlüsselt (AES-256-GCM)</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-item')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <form id="form-vault-item" onsubmit="saveVaultItem(event)">
@@ -487,11 +497,11 @@
             <label for="item-password">Passwort</label>
             <div style="display: flex; gap: 8px;">
               <input type="password" id="item-password" class="form-input" placeholder="••••••••••••" oninput="evaluateItemPasswordStrength(this.value)">
-              <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('item-password')" title="Sichtbarkeit">
-                <svg viewBox="0 0 24 24" style="width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <button type="button" class="btn btn-secondary btn-icon-square" onclick="togglePasswordVisibility('item-password')" title="Sichtbarkeit">
+                <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               </button>
-              <button type="button" class="btn btn-secondary" onclick="generatePasswordIntoField('item-password')" title="Zufälliges Passwort einfügen">
-                <svg viewBox="0 0 24 24" style="width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="15.5" r="1.5"/><circle cx="8.5" cy="15.5" r="1.5"/></svg>
+              <button type="button" class="btn btn-secondary btn-icon-square" onclick="generatePasswordIntoField('item-password')" title="Zufälliges Passwort einfügen">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="8.5" r="1.5"/><circle cx="15.5" cy="15.5" r="1.5"/><circle cx="8.5" cy="15.5" r="1.5"/></svg>
               </button>
             </div>
             <div class="strength-bar" style="margin-top: 6px;"><div id="item-strength-fill" class="strength-bar-fill"></div></div>
@@ -585,7 +595,7 @@
             <p style="font-size: 0.8rem; color: #a78bfa;">FIDO2 / WebAuthn (ECDSA P-256)</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-passkey')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-passkey')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <form id="form-passkey" onsubmit="savePasskey(event)">
@@ -635,7 +645,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Live-Simulation einer WebAuthn-Authentifizierung</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-passkey-playground')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-passkey-playground')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="margin-bottom: 16px;">
@@ -694,7 +704,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Google Authenticator, sentinelbit, 1Password</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-2fa')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-2fa')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <!-- State: Enable / Setup -->
@@ -765,8 +775,16 @@
   <div class="modal-overlay" id="modal-generator">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Passwort- & Passphrase-Generator</h3>
-        <button class="btn-icon" onclick="closeModal('modal-generator')">✕</button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="modal-header-icon" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="9" y1="15" x2="9.01" y2="15"/><line x1="15" y1="15" x2="15.01" y2="15"/></svg>
+          </span>
+          <div>
+            <h3>Passwort- & Passphrase-Generator</h3>
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Kryptografisch sichere Passwörter (CSPRNG)</p>
+          </div>
+        </div>
+        <button class="btn-icon" onclick="closeModal('modal-generator')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="tab-nav">
@@ -775,10 +793,14 @@
       </div>
 
       <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px;">
-        <div id="gen-password-display" style="font-family: monospace; font-size: 1.3rem; word-break: break-all; color: #60a5fa; margin-bottom: 8px;"></div>
+        <div id="gen-password-display" style="font-family: monospace; font-size: 1.3rem; word-break: break-all; color: #60a5fa; margin-bottom: 8px; min-height: 1.6rem;"></div>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary" style="flex: 1;" onclick="copyToClipboard(document.getElementById('gen-password-display').innerText, 'Passwort kopiert!')">Kopieren</button>
-          <button class="btn btn-primary" onclick="runPasswordGenerator()">Neu würfeln</button>
+          <button class="btn btn-secondary" style="flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;" onclick="copyToClipboard(document.getElementById('gen-password-display').innerText, 'Passwort kopiert!')">
+            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Kopieren
+          </button>
+          <button class="btn btn-primary" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;" onclick="runPasswordGenerator()">
+            <svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19"/></svg> Neu würfeln
+          </button>
         </div>
       </div>
 
@@ -860,7 +882,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Zero-Knowledge Analyse: Schwache & wiederverwendete Passwörter, 2FA-Lücken & Datenlecks</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-audit')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-audit')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="overflow-y: auto; padding-right: 4px; flex: 1;">
@@ -915,7 +937,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">FIDO2 Platform Authenticator (PIN / Fingerabdruck)</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-biometric')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-biometric')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div id="bio-status-card" style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
@@ -953,7 +975,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Verschlüsselt oder im Klartext sichern</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-backup')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-backup')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="margin-bottom: 20px;">
@@ -1008,7 +1030,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Kontinuierliche verschlüsselte Sicherung in Wunschordner</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-sync')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-sync')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <form id="form-sync-settings" onsubmit="saveSyncSettings(event)">
@@ -1089,7 +1111,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Echte E-Mail-Adresse vor Spam & Leaks schützen</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-aliases')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-aliases')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="display: flex; gap: 8px; margin-bottom: 16px;">
@@ -1119,7 +1141,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Ende-zu-Ende verschlüsselte Freigabe an andere Nutzer</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-sharing')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-sharing')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="tab-nav">
@@ -1167,7 +1189,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Meistere deine digitale Sicherheit und schalte Abzeichen frei</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-achievements')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-achievements')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div id="achievements-full-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding-right: 4px;">
@@ -1195,7 +1217,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Doppelte Passwörter bereinigen oder Tresor für Neuimport leeren</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-cleanup')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-cleanup')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <!-- Tab Buttons for Cleanup -->
@@ -1290,7 +1312,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Automatisches Ausfüllen, Passkeys & 2FA direkt im Browser</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-extension')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-extension')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
@@ -1348,17 +1370,17 @@
        MODAL: COMMAND PALETTE (Ctrl + K)
   ============================================================ -->
   <div class="modal-overlay" id="modal-command-palette" onclick="if(event.target === this) closeCommandPalette()">
-    <div class="modal-dialog cmd-palette-dialog" style="max-width: 600px; padding: 0; overflow: hidden; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.7);">
-      <div style="display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid #1e293b; gap: 10px;">
-        <span style="font-size: 1.2rem; color: #60a5fa;">⌘</span>
-        <input type="text" id="cmd-palette-input" placeholder="Suche Einträge oder tippe einen Befehl (Pfeiltasten + Enter)..." style="flex: 1; background: transparent; border: none; outline: none; color: white; font-size: 1rem;" autocomplete="off">
-        <span style="font-size: 0.72rem; background: #1e293b; color: #94a3b8; padding: 3px 6px; border-radius: 4px; border: 1px solid #334155;">ESC</span>
+    <div class="modal-dialog cmd-palette-dialog">
+      <div class="cmd-palette-header">
+        <span style="display: inline-flex; align-items: center; color: var(--accent-primary);"><svg viewBox="0 0 24 24" style="width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg></span>
+        <input type="text" id="cmd-palette-input" placeholder="Suche Einträge oder tippe einen Befehl (Pfeiltasten + Enter)..." autocomplete="off">
+        <kbd class="cmd-esc-badge">ESC</kbd>
       </div>
       <div id="cmd-palette-results" style="max-height: 380px; overflow-y: auto; padding: 8px;">
         <!-- Dynamic results populated by app.js -->
       </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 18px; background: #0b0f19; border-top: 1px solid #1e293b; font-size: 0.72rem; color: #64748b;">
-        <span><kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↑</kbd> <kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↓</kbd> Navigieren · <kbd style="background: #1e293b; padding: 1px 4px; border-radius: 3px;">↵</kbd> Auswählen</span>
+      <div class="cmd-palette-footer">
+        <span><kbd>↑</kbd> <kbd>↓</kbd> Navigieren · <kbd>↵</kbd> Auswählen</span>
         <span>SentinelBit Quick Command</span>
       </div>
     </div>
@@ -1379,7 +1401,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Einmal-Links mit Zero-Knowledge Ende-zu-Ende Verschlüsselung</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-secure-send')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-secure-send')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div id="secure-send-form-view">
@@ -1486,7 +1508,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Druckbares Dokument für Notfälle und Hinterbliebene</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-emergency-kit')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-emergency-kit')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="overflow-y: auto; padding-right: 4px; flex: 1;">
@@ -1574,7 +1596,7 @@
           </span>
           <h3>2FA QR-Code Scanner</h3>
         </div>
-        <button class="btn-icon" onclick="closeQrScannerModal()">✕</button>
+        <button class="btn-icon" onclick="closeQrScannerModal()" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div style="position: relative; width: 100%; height: 280px; background: #000; border-radius: 8px; overflow: hidden; margin: 12px 0;">
@@ -1607,7 +1629,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Atomare Re-Verschlüsselung aller Einträge</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-change-password')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-change-password')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <form onsubmit="event.preventDefault(); submitChangeMasterPassword();">
@@ -1658,7 +1680,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Mathematische 3-aus-5 Schlüssel-Aufteilung (GF(256))</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-shamir')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-shamir')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
@@ -1702,7 +1724,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Echtzeit-Benachrichtigungen bei Tresor-Änderungen</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-webhooks')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-webhooks')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <form onsubmit="event.preventDefault(); submitCreateWebhook();" style="margin-bottom: 20px;">
@@ -1745,7 +1767,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Automatischer Zugriff bei längerer Inaktivität</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-emergency-contacts')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-emergency-contacts')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 16px;">
@@ -1794,7 +1816,7 @@
             <p style="font-size: 0.8rem; color: var(--text-dim);">Protokollierte Sicherheitsereignisse deines Tresors</p>
           </div>
         </div>
-        <button class="btn-icon" onclick="closeModal('modal-audit-log')">✕</button>
+        <button class="btn-icon" onclick="closeModal('modal-audit-log')" title="Schließen"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div id="audit-logs-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto;">
