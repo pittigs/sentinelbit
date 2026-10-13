@@ -1749,6 +1749,23 @@ async function renderVaultItems() {
   updateLiveTotpCards();
 }
 
+function formatTimeAgo(dateStr) {
+  if (!dateStr) return "Nie";
+  try {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return "Gerade eben";
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `Vor ${mins} Min.`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Vor ${hours} Std.`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `Vor ${days} Tagen`;
+    return new Date(dateStr).toLocaleDateString();
+  } catch (_) {
+    return "";
+  }
+}
+
 function renderPasskeyCards(passkeys) {
   const container = document.getElementById("items-container");
   for (const pk of passkeys) {
@@ -1788,6 +1805,10 @@ function renderPasskeyCards(passkeys) {
         <div class="card-field-col card-field-pwd">
           <span class="card-field-label">Credential ID:</span>
           <span class="card-field-val" style="color: #60a5fa; font-size: 0.75rem;">${escapeHtml(pk.credential_id.substring(0, 16))}...</span>
+        </div>
+        <div class="card-field-col" style="flex: 1 1 100%; display: flex; gap: 14px; margin-top: 4px; font-size: 0.72rem; color: #94a3b8;">
+          <span>🕒 Zuletzt genutzt: <strong style="color: #cbd5e1;">${escapeHtml(formatTimeAgo(pk.last_used_at))}</strong></span>
+          ${pk.sign_count ? `<span>⚡ Signaturen: <strong style="color: #cbd5e1;">${pk.sign_count}</strong></span>` : ''}
         </div>
       </div>
 

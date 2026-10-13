@@ -817,6 +817,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ status: "ok" });
     });
     return true;
+  } else if (request.action === "WEBAUTHN_RECORD_USAGE") {
+    const pkId = request.passkeyId;
+    if (pkId) {
+      getSessionData().then(async (session) => {
+        const pks = session.vault_passkeys || [];
+        const now = new Date().toISOString();
+        let updated = false;
+        for (const pk of pks) {
+          if (pk.id === pkId || pk.credential_id === pkId) {
+            pk.last_used_at = now;
+            pk.sign_count = (pk.sign_count || 0) + 1;
+            updated = true;
+          }
+        }
+        if (updated && chrome.storage.session) {
+          await chrome.storage.session.set({ vault_passkeys: pks });
+        }
+        const token = session.vault_token;
+        if (token) {
+          chrome.storage.local.get(["server_url"], async (loc) => {
+            const serverUrl = loc.server_url || "http://127.0.0.1:8000";
+            try {
+              await fetch(`${serverUrl}/api/passkeys/${encodeURIComponent(pkId)}/touch`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+              });
+            } catch (_) {}
+          });
+        }
+      });
+    }
+    sendResponse({ status: "ok" });
+    return true;
   }
   return true;
 });

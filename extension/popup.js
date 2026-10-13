@@ -583,22 +583,48 @@ function renderPasskeys() {
     return;
   }
 
+function formatTimeAgo(dateStr) {
+  if (!dateStr) return "Nie verwendet";
+  try {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return "Gerade eben";
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `Vor ${mins} Min.`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Vor ${hours} Std.`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `Vor ${days} Tg.`;
+    return new Date(dateStr).toLocaleDateString();
+  } catch (_) {
+    return "";
+  }
+}
+
   for (const pk of filtered) {
     const card = document.createElement("div");
     card.className = "item-card";
     card.style.border = "1px solid rgba(139, 92, 246, 0.4)";
     card.style.background = "rgba(139, 92, 246, 0.08)";
 
+    const rpDomain = extractDomain(pk.rp_id || "");
+    const favUrl = rpDomain ? `https://icons.duckduckgo.com/ip3/${rpDomain}.ico` : "";
+    const lastUsed = formatTimeAgo(pk.last_used_at);
+
     card.innerHTML = `
       <div class="item-header">
-        <div class="item-title" style="color: #c4b5fd;" title="${escapeHtml(pk.rp_name || pk.rp_id)}">⚡ ${escapeHtml(pk.rp_name || pk.rp_id)}</div>
+        <div class="item-title" style="color: #c4b5fd; display: flex; align-items: center; gap: 6px;" title="${escapeHtml(pk.rp_name || pk.rp_id)}">
+          ${favUrl ? `<img src="${favUrl}" style="width: 14px; height: 14px; border-radius: 3px; object-fit: contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" />` : ''}
+          <span style="${favUrl ? 'display: none;' : ''}">⚡</span>
+          <span>${escapeHtml(pk.rp_name || pk.rp_id)}</span>
+        </div>
         <span style="font-size: 10px; background: rgba(139, 92, 246, 0.25); color: #c4b5fd; padding: 2px 6px; border-radius: 999px; border: 1px solid rgba(139, 92, 246, 0.35); font-weight: 600;">FIDO2</span>
       </div>
       <div class="item-user" style="color: #cbd5e1;" title="${escapeHtml(pk.username || '')}">
         Benutzer: <strong>${escapeHtml(pk.username || 'Unbekannt')}</strong>
       </div>
-      <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 8px;">
-        ID: <span style="font-family: monospace; color: #a5b4fc;">${escapeHtml((pk.credential_id || '').substring(0, 16))}...</span>
+      <div style="font-size: 0.72rem; color: #94a3b8; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span>ID: <span style="font-family: monospace; color: #a5b4fc;">${escapeHtml((pk.credential_id || '').substring(0, 14))}...</span></span>
+        <span style="color: #64748b; font-size: 0.68rem;" title="${pk.last_used_at || ''}">🕒 ${escapeHtml(lastUsed)}</span>
       </div>
       <div class="actions">
         <button class="btn btn-autofill btn-fill-pk" style="background: #7c3aed;">

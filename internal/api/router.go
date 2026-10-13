@@ -118,6 +118,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 			pk.Get("/", RequireAuth(HandleListPasskeys(database)))
 			pk.Post("/", RequireAuth(HandleSavePasskey(database)))
 			pk.Delete("/{passkeyId}", RequireAuth(HandleDeletePasskey(database)))
+			pk.Post("/{passkeyId}/touch", RequireAuth(HandleTouchPasskey(database)))
 			pk.Post("/sign-test", RequireAuth(HandlePasskeySignTest))
 		})
 

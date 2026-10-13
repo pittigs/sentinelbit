@@ -1401,7 +1401,8 @@ function ensureOverlayContainer() {
       <div class="sb-modal-box">
         <div class="sb-modal-header">
           <div class="sb-modal-brand">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" style="width: 18px; height: 18px;">
+            <img id="sb-pk-modal-icon" src="" style="width: 18px; height: 18px; border-radius: 4px; display: none; object-fit: contain; vertical-align: middle;" />
+            <svg id="sb-pk-modal-svg" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" style="width: 18px; height: 18px;">
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
             </svg>
             <span id="sb-pk-modal-title">sentinelbit Passkey</span>
@@ -1775,6 +1776,7 @@ function promptPasskeyAssertion(passkeys, rpId, callback) {
 
   const passkeyList = Array.isArray(passkeys) ? passkeys : [passkeys];
   let selectedPasskey = passkeyList[0];
+  let selectedIndex = 0;
 
   const modal = shadowRoot.getElementById("sb-passkey-modal");
   const title = shadowRoot.getElementById("sb-pk-modal-title");
@@ -1794,10 +1796,53 @@ function promptPasskeyAssertion(passkeys, rpId, callback) {
   title.innerText = "sentinelbit Passkey";
   badge.innerText = "FIDO2";
   rp.innerText = rpId;
-  btnConfirm.innerText = "⚡ Anmelden";
+  btnConfirm.innerText = "⚡ Anmelden (Enter)";
+  btnCancel.innerText = "Abbrechen (Esc)";
+
+  // Favicon loader
+  const domain = extractDomain(rpId || window.location.hostname);
+  const iconImg = shadowRoot.getElementById("sb-pk-modal-icon");
+  const iconSvg = shadowRoot.getElementById("sb-pk-modal-svg");
+  if (iconImg && iconSvg) {
+    if (domain) {
+      iconImg.src = `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+      iconImg.onload = () => {
+        iconImg.style.display = "inline-block";
+        iconSvg.style.display = "none";
+      };
+      iconImg.onerror = () => {
+        iconImg.style.display = "none";
+        iconSvg.style.display = "inline-block";
+      };
+    } else {
+      iconImg.style.display = "none";
+      iconSvg.style.display = "inline-block";
+    }
+  }
+
+  const updateAccountSelection = (index) => {
+    if (index < 0 || index >= passkeyList.length) return;
+    selectedIndex = index;
+    selectedPasskey = passkeyList[selectedIndex];
+    if (accountsContainer) {
+      const allCards = accountsContainer.querySelectorAll(".sb-modal-account-card");
+      allCards.forEach((c, idx) => {
+        if (idx === selectedIndex) {
+          c.classList.add("selected");
+          const chk = c.querySelector(".sb-modal-account-check");
+          if (chk) chk.innerText = "✓";
+          c.scrollIntoView({ block: "nearest" });
+        } else {
+          c.classList.remove("selected");
+          const chk = c.querySelector(".sb-modal-account-check");
+          if (chk) chk.innerText = "";
+        }
+      });
+    }
+  };
 
   if (passkeyList.length > 1) {
-    text.innerText = "Wähle einen Account für die Anmeldung:";
+    text.innerText = "Wähle einen Account für die Anmeldung (↑/↓):";
     if (user) user.style.display = "none";
     if (accountsContainer) {
       accountsContainer.style.display = "flex";
@@ -1814,16 +1859,7 @@ function promptPasskeyAssertion(passkeys, rpId, callback) {
           <span class="sb-modal-account-check">${index === 0 ? "✓" : ""}</span>
         `;
         card.onclick = () => {
-          selectedPasskey = pk;
-          const allCards = accountsContainer.querySelectorAll(".sb-modal-account-card");
-          allCards.forEach(c => {
-            c.classList.remove("selected");
-            const chk = c.querySelector(".sb-modal-account-check");
-            if (chk) chk.innerText = "";
-          });
-          card.classList.add("selected");
-          const chk = card.querySelector(".sb-modal-account-check");
-          if (chk) chk.innerText = "✓";
+          updateAccountSelection(index);
         };
         accountsContainer.appendChild(card);
       });
@@ -1842,7 +1878,34 @@ function promptPasskeyAssertion(passkeys, rpId, callback) {
 
   modal.classList.add("open");
 
+  const onKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      callback(true, selectedPasskey);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      callback(false, null);
+    } else if (e.key === "ArrowDown") {
+      if (passkeyList.length > 1) {
+        e.preventDefault();
+        updateAccountSelection((selectedIndex + 1) % passkeyList.length);
+      }
+    } else if (e.key === "ArrowUp") {
+      if (passkeyList.length > 1) {
+        e.preventDefault();
+        updateAccountSelection((selectedIndex - 1 + passkeyList.length) % passkeyList.length);
+      }
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown, true);
+
   const cleanup = () => {
+    window.removeEventListener("keydown", onKeyDown, true);
     modal.classList.remove("open");
     btnConfirm.onclick = null;
     btnCancel.onclick = null;
@@ -1893,11 +1956,49 @@ function promptPasskeyCreation(rpName, rpId, username, callback) {
     user.innerText = username || "Account";
   }
   rp.innerText = rpId;
-  btnConfirm.innerText = "🔑 Im Tresor speichern";
+  btnConfirm.innerText = "🔑 Im Tresor speichern (Enter)";
+  btnCancel.innerText = "Abbrechen (Esc)";
+
+  const domain = extractDomain(rpId || window.location.hostname);
+  const iconImg = shadowRoot.getElementById("sb-pk-modal-icon");
+  const iconSvg = shadowRoot.getElementById("sb-pk-modal-svg");
+  if (iconImg && iconSvg) {
+    if (domain) {
+      iconImg.src = `https://icons.duckduckgo.com/ip3/${domain}.ico`;
+      iconImg.onload = () => {
+        iconImg.style.display = "inline-block";
+        iconSvg.style.display = "none";
+      };
+      iconImg.onerror = () => {
+        iconImg.style.display = "none";
+        iconSvg.style.display = "inline-block";
+      };
+    } else {
+      iconImg.style.display = "none";
+      iconSvg.style.display = "inline-block";
+    }
+  }
 
   modal.classList.add("open");
 
+  const onKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      callback(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      callback(false);
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown, true);
+
   const cleanup = () => {
+    window.removeEventListener("keydown", onKeyDown, true);
     modal.classList.remove("open");
     btnConfirm.onclick = null;
     btnCancel.onclick = null;
@@ -1946,11 +2047,23 @@ function promptPasskeyLocked(rpId, onCancel) {
   if (user) user.style.display = "none";
   rp.innerText = rpId;
   btnConfirm.innerText = "ℹ️ Erweiterung entsperren";
-  btnCancel.innerText = "Abbrechen / Nativ";
+  btnCancel.innerText = "Abbrechen / Nativ (Esc)";
 
   modal.classList.add("open");
 
+  const onKeyDown = (e) => {
+    if (e.key === "Escape" || e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      if (onCancel) onCancel();
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown, true);
+
   const cleanup = () => {
+    window.removeEventListener("keydown", onKeyDown, true);
     modal.classList.remove("open");
     btnConfirm.onclick = null;
     btnCancel.onclick = null;
@@ -2015,6 +2128,10 @@ async function handleWebAuthnGetRequest(requestId, options) {
           const targetPk = selectedPk || response.passkeys[0];
           console.log("[sentinelbit] Conditional UI resolver triggered for passkey:", targetPk);
           const assertion = await signWebAuthnAssertion(targetPk, rpId, challenge);
+          chrome.runtime.sendMessage({
+            action: "WEBAUTHN_RECORD_USAGE",
+            passkeyId: targetPk.id || targetPk.credential_id
+          });
           showInPageNotification(`✓ Mit Passkey (${targetPk.username || rpId}) angemeldet!`, "⚡");
           window.postMessage({
             source: "SENTINELBIT_CONTENT_WEBAUTHN",
@@ -2054,6 +2171,10 @@ async function handleWebAuthnGetRequest(requestId, options) {
       try {
         console.log("[sentinelbit] User approved passkey assertion for rpId:", rpId, passkey);
         const assertion = await signWebAuthnAssertion(passkey, rpId, challenge);
+        chrome.runtime.sendMessage({
+          action: "WEBAUTHN_RECORD_USAGE",
+          passkeyId: passkey.id || passkey.credential_id
+        });
         console.log("[sentinelbit] Successfully generated assertion:", assertion);
         showInPageNotification(`✓ Mit Passkey (${passkey.username || rpId}) angemeldet!`, "⚡");
         window.postMessage({

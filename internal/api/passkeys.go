@@ -149,6 +149,25 @@ func HandleDeletePasskey(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func HandleTouchPasskey(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserFromCtx(r)
+		pkId := chi.URLParam(r, "passkeyId")
+		now := time.Now().UTC().Format(time.RFC3339)
+		_, err := db.Exec(`
+			UPDATE passkeys 
+			SET last_used_at = ?, sign_count = sign_count + 1 
+			WHERE (id = ? OR credential_id = ?) AND user_id = ?
+		`, now, pkId, pkId, user.UserId)
+		if err != nil {
+			HTTPError(w, "Fehler beim Aktualisieren des Passkeys", http.StatusInternalServerError)
+			return
+		}
+		Broker.Broadcast(user.UserId, "passkey_touched", pkId)
+		JSONResponse(w, map[string]string{"status": "ok", "last_used_at": now}, http.StatusOK)
+	}
+}
+
 func HandlePasskeySignTest(w http.ResponseWriter, r *http.Request) {
 	var req models.PasskeySignTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
