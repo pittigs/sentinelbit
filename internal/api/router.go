@@ -175,20 +175,28 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 
 	if _, err := os.Stat(localIndex); err == nil {
 		fs := http.FileServer(http.Dir(staticDir))
-		r.Handle("/static/*", http.StripPrefix("/static/", fs))
+		r.Handle("/static/*", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+			fs.ServeHTTP(w, r)
+		})))
 		r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			http.ServeFile(w, r, filepath.Join(staticDir, "sw.js"))
 		})
 		r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFile(w, r, filepath.Join(staticDir, "manifest.webmanifest"))
 		})
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 			http.ServeFile(w, r, localIndex)
 		})
 	} else {
 		// Embedded filesystem fallback
 		embeddedFS := http.FileServer(http.FS(static.EmbeddedFiles))
-		r.Handle("/static/*", http.StripPrefix("/static/", embeddedFS))
+		r.Handle("/static/*", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+			embeddedFS.ServeHTTP(w, r)
+		})))
 		r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
 			content, err := static.EmbeddedFiles.ReadFile("sw.js")
 			if err != nil {
@@ -196,6 +204,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 				return
 			}
 			w.Header().Set("Content-Type", "application/javascript")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			_, _ = w.Write(content)
 		})
 		r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +223,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 			_, _ = w.Write(content)
 		})
 	}

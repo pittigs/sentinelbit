@@ -1,4 +1,4 @@
-const CACHE_NAME = "sentinelbit-v2.1.0";
+const CACHE_NAME = "sentinelbit-v3.3.0";
 const ASSETS_TO_CACHE = [
   "/",
   "/static/index.html",
