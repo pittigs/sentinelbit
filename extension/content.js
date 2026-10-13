@@ -27,16 +27,17 @@ window.addEventListener("message", async (event) => {
 });
 
 // =============================================================
-// 1. EXTENSION TO WEBPAGE SYNC BRIDGE (http://127.0.0.1:8000)
+// 1. EXTENSION TO WEBPAGE SYNC BRIDGE
 // =============================================================
 
-const isSentinelBitVaultPage =
-  window.location.origin === "http://127.0.0.1:8000" ||
-  window.location.origin === "http://localhost:8000" ||
-  !!document.querySelector('meta[name="sentinelbit-vault"]') ||
-  document.title.toLowerCase().includes("sentinelbit");
+let isSentinelBitVaultPage = false;
+let vaultBridgeInitialized = false;
 
-if (isSentinelBitVaultPage) {
+function initVaultBridge() {
+  if (vaultBridgeInitialized) return;
+  vaultBridgeInitialized = true;
+  isSentinelBitVaultPage = true;
+
   // Store detected active server origin in extension storage
   chrome.storage.local.set({ server_url: window.location.origin });
 
@@ -44,7 +45,7 @@ if (isSentinelBitVaultPage) {
   window.postMessage({
     source: "SENTINELBIT_EXTENSION",
     action: "EXTENSION_READY",
-    version: "3.0.0"
+    version: "3.0.2"
   }, window.location.origin);
 
   // Listen for sync messages from the web vault
@@ -85,11 +86,32 @@ if (isSentinelBitVaultPage) {
         window.postMessage({
           source: "SENTINELBIT_EXTENSION",
           action: "EXTENSION_READY",
-          version: "3.0.0"
+          version: "3.0.2"
         }, window.location.origin);
       }
     }
   });
+}
+
+function checkAndInitVaultBridge() {
+  const isVault =
+    window.location.origin === "http://127.0.0.1:8000" ||
+    window.location.origin === "http://localhost:8000" ||
+    (window.location.hostname.includes("vault.") && window.location.hostname.includes("pittigs")) ||
+    !!document.querySelector('meta[name="sentinelbit-vault"]') ||
+    (document.title && document.title.toLowerCase().includes("sentinelbit"));
+
+  if (isVault) {
+    initVaultBridge();
+    return true;
+  }
+  return false;
+}
+
+if (!checkAndInitVaultBridge()) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", checkAndInitVaultBridge);
+  }
 }
 
 // =============================================================
@@ -1892,6 +1914,60 @@ function promptPasskeyCreation(rpName, rpId, username, callback) {
   };
 }
 
+function promptPasskeyLocked(rpId, onCancel) {
+  ensureOverlayContainer();
+  if (!shadowRoot) {
+    if (onCancel) onCancel();
+    return;
+  }
+
+  const modal = shadowRoot.getElementById("sb-passkey-modal");
+  const title = shadowRoot.getElementById("sb-pk-modal-title");
+  const badge = shadowRoot.getElementById("sb-pk-modal-badge");
+  const text = shadowRoot.getElementById("sb-pk-modal-text");
+  const user = shadowRoot.getElementById("sb-pk-modal-user");
+  const rp = shadowRoot.getElementById("sb-pk-modal-rp");
+  const accountsContainer = shadowRoot.getElementById("sb-pk-modal-accounts");
+  const btnConfirm = shadowRoot.getElementById("sb-pk-modal-confirm");
+  const btnCancel = shadowRoot.getElementById("sb-pk-modal-cancel");
+
+  if (!modal || !btnConfirm || !btnCancel) {
+    if (onCancel) onCancel();
+    return;
+  }
+
+  title.innerText = "SentinelBit gesperrt";
+  badge.innerText = "GESPERRT";
+  text.innerText = "Dein SentinelBit-Tresor ist gesperrt. Bitte öffne die Erweiterung im Browser und entsperre sie mit deinem Master-Passwort, um diesen Passkey zu nutzen.";
+  if (accountsContainer) {
+    accountsContainer.style.display = "none";
+    accountsContainer.innerHTML = "";
+  }
+  if (user) user.style.display = "none";
+  rp.innerText = rpId;
+  btnConfirm.innerText = "ℹ️ Erweiterung entsperren";
+  btnCancel.innerText = "Abbrechen / Nativ";
+
+  modal.classList.add("open");
+
+  const cleanup = () => {
+    modal.classList.remove("open");
+    btnConfirm.onclick = null;
+    btnCancel.onclick = null;
+  };
+
+  btnConfirm.onclick = () => {
+    cleanup();
+    showInPageNotification("Klicke auf das SentinelBit-Icon in deiner Browser-Leiste oben rechts.", "🔑", 6000);
+    if (onCancel) onCancel();
+  };
+
+  btnCancel.onclick = () => {
+    cleanup();
+    if (onCancel) onCancel();
+  };
+}
+
 async function handleWebAuthnGetRequest(requestId, options) {
   const { rpId, challenge, allowCredentials, mediation } = options;
   console.log("[sentinelbit-content] handleWebAuthnGetRequest for rpId:", rpId, "allowCredentials:", allowCredentials);
@@ -1904,11 +1980,22 @@ async function handleWebAuthnGetRequest(requestId, options) {
     console.log("[sentinelbit-content] WEBAUTHN_GET_MATCHES response:", response);
 
     if (response && response.status === "locked") {
-      showInPageNotification("🔒 Sentinelbit ist gesperrt: Bitte Erweiterung entsperren", "🔒", 4000);
+      showInPageNotification("🔒 SentinelBit ist gesperrt: Bitte Erweiterung entsperren", "🔒", 6000);
+      promptPasskeyLocked(rpId, () => {
+        window.postMessage({
+          source: "SENTINELBIT_CONTENT_WEBAUTHN",
+          requestId,
+          status: "fallback"
+        }, "*");
+      });
+      return;
     }
 
     if (chrome.runtime.lastError || !response || response.status !== "ok" || !response.passkeys || response.passkeys.length === 0) {
-      console.log("[sentinelbit-content] No passkeys matched or error, falling back to native WebAuthn");
+      console.log("[sentinelbit-content] No passkeys matched or error for rpId:", rpId, "- falling back to native WebAuthn");
+      if (rpId && (rpId.includes("google") || rpId.includes("gmail"))) {
+        showInPageNotification("Kein passender Passkey für Google in SentinelBit gefunden.", "ℹ️", 4500);
+      }
       window.postMessage({
         source: "SENTINELBIT_CONTENT_WEBAUTHN",
         requestId,

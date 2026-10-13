@@ -189,8 +189,10 @@
                   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
                 }
                 const s = String(bufOrStr).trim();
-                const cleanHex = s.replace(/[^0-9a-fA-F]/g, "");
-                if (cleanHex.length >= 32 && cleanHex.length % 2 === 0 && (s.includes("-") || s.length === cleanHex.length)) {
+                const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+                const isPureHex = /^[0-9a-fA-F]{32,}$/.test(s) && s.length % 2 === 0;
+                if (isUuid || isPureHex) {
+                  const cleanHex = s.replace(/-/g, "");
                   try {
                     const matchBytes = new Uint8Array(cleanHex.length / 2);
                     for (let i = 0; i < cleanHex.length; i += 2) {

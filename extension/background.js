@@ -188,6 +188,26 @@ function getBaseDomain(domain) {
   return parts.slice(-2).join(".");
 }
 
+const DOMAIN_EQUIVALENTS = [
+  ["google.com", "accounts.google.com", "gmail.com", "googlemail.com", "google.de", "youtube.com"],
+  ["microsoft.com", "live.com", "login.live.com", "office.com", "microsoftonline.com"],
+  ["apple.com", "icloud.com", "appleid.apple.com"],
+  ["amazon.com", "amazon.de", "amazon.co.uk"]
+];
+
+function areDomainsEquivalent(d1, d2) {
+  if (!d1 || !d2) return false;
+  const c1 = d1.toLowerCase().replace(/^www\./, "").trim();
+  const c2 = d2.toLowerCase().replace(/^www\./, "").trim();
+  if (c1 === c2) return true;
+  for (const group of DOMAIN_EQUIVALENTS) {
+    const inGroup1 = group.some(g => c1 === g || c1.endsWith("." + g) || g.endsWith("." + c1));
+    const inGroup2 = group.some(g => c2 === g || c2.endsWith("." + g) || g.endsWith("." + c2));
+    if (inGroup1 && inGroup2) return true;
+  }
+  return false;
+}
+
 function matchesDomain(item, currentHostname) {
   if (!currentHostname) return true;
   const currentClean = currentHostname.toLowerCase().replace(/^www\./, "");
@@ -200,11 +220,15 @@ function matchesDomain(item, currentHostname) {
     if (itemDomain === currentClean || itemBase === currentBase) return true;
     if (currentClean.endsWith("." + itemDomain) || itemDomain.endsWith("." + currentClean)) return true;
     if (itemDomain.includes(currentBase) || currentClean.includes(itemBase)) return true;
+    if (areDomainsEquivalent(itemDomain, currentClean)) return true;
   }
 
   if (item.title && currentName && currentName.length >= 3) {
     const cleanTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (cleanTitle === currentName || cleanTitle.includes(currentName) || currentName.includes(cleanTitle)) {
+      return true;
+    }
+    if ((cleanTitle.includes("google") || cleanTitle.includes("gmail")) && (currentName === "google" || currentName === "accounts" || currentClean.includes("google"))) {
       return true;
     }
   }
@@ -672,9 +696,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "WEBAUTHN_GET_MATCHES") {
     const rpId = (request.rpId || "").toLowerCase().trim();
     const allowCreds = request.allowCredentials || [];
-    getSessionData().then((session) => {
-      const passkeys = session.vault_passkeys || [];
-      const cache = session.vault_cache || [];
+
+    (async () => {
+      let session = await getSessionData();
+      let passkeys = session.vault_passkeys || [];
+      let cache = session.vault_cache || [];
+
+      // If session is empty, check if an open web vault tab can instantly hydrate it!
+      if (passkeys.length === 0 && cache.length === 0) {
+        await new Promise((resolve) => {
+          chrome.tabs.query({}, (tabs) => {
+            let pending = tabs ? tabs.length : 0;
+            if (pending === 0) return resolve();
+            for (const t of tabs) {
+              if (t.id) {
+                chrome.tabs.sendMessage(t.id, { action: "TRIGGER_VAULT_PAGE_SYNC" }, () => {
+                  pending--;
+                  if (pending <= 0) resolve();
+                });
+              } else {
+                pending--;
+                if (pending <= 0) resolve();
+              }
+            }
+          });
+          setTimeout(resolve, 350);
+        });
+        session = await getSessionData();
+        passkeys = session.vault_passkeys || [];
+        cache = session.vault_cache || [];
+      }
 
       // Check if vault is locked
       if (passkeys.length === 0 && cache.length === 0) {
@@ -697,8 +748,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
         }
         const str = String(s).trim();
-        const cleanHex = str.replace(/[^0-9a-fA-F]/g, "");
-        if (cleanHex.length >= 32 && cleanHex.length % 2 === 0 && (str.includes("-") || str.length === cleanHex.length)) {
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+        const isPureHex = /^[0-9a-fA-F]{32,}$/.test(str) && str.length % 2 === 0;
+
+        if (isUuid || isPureHex) {
+          const cleanHex = str.replace(/-/g, "");
           try {
             let binary = "";
             for (let i = 0; i < cleanHex.length; i += 2) {
@@ -712,7 +766,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       let matches = passkeys.filter(pk => {
         const pkRp = (extractDomain(pk.rp_id || "") || (pk.rp_id || "")).toLowerCase().trim();
-        return pkRp === rpId || rpId.endsWith("." + pkRp) || pkRp.endsWith("." + rpId) || matchesDomain({ url: pk.rp_id, title: pk.rp_name }, rpId);
+        return pkRp === rpId ||
+          rpId.endsWith("." + pkRp) ||
+          pkRp.endsWith("." + rpId) ||
+          areDomainsEquivalent(pkRp, rpId) ||
+          matchesDomain({ url: pk.rp_id, title: pk.rp_name }, rpId);
       });
 
       if (allowCreds.length > 0) {
@@ -720,6 +778,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const exactMatches = matches.filter(pk => credIdSet.has(normId(pk.credential_id)));
         if (exactMatches.length > 0) {
           matches = exactMatches;
+        } else {
+          console.warn("[sentinelbit-bg] allowCredentials did not match any stored passkey id in vault:", allowCreds.map(c => normId(c.id)));
         }
       }
 
@@ -727,7 +787,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         status: matches.length > 0 ? "ok" : "no_passkey",
         passkeys: matches
       });
-    });
+    })();
     return true;
   } else if (request.action === "WEBAUTHN_SAVE_PASSKEY") {
     const pk = request.passkey;

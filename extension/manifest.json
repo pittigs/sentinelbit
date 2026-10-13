@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "sentinelbit Password & Passkey Manager",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Zero-Knowledge Autofill, Passkeys und 2FA-Codes für deine selbstgehostete sentinelbit Instanz.",
   "permissions": [
     "activeTab",
@@ -57,7 +57,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle",
+      "run_at": "document_start",
       "all_frames": true
     }
   ],
