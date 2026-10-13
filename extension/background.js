@@ -690,12 +690,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       function normId(s) {
         if (!s) return "";
+        if (s instanceof ArrayBuffer || s instanceof Uint8Array || ArrayBuffer.isView(s)) {
+          let bytes = s instanceof Uint8Array ? s : new Uint8Array(s.buffer || s, s.byteOffset || 0, s.byteLength);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
         const str = String(s).trim();
-        if (str.length >= 32 && str.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(str)) {
+        const cleanHex = str.replace(/[^0-9a-fA-F]/g, "");
+        if (cleanHex.length >= 32 && cleanHex.length % 2 === 0 && (str.includes("-") || str.length === cleanHex.length)) {
           try {
             let binary = "";
-            for (let i = 0; i < str.length; i += 2) {
-              binary += String.fromCharCode(parseInt(str.substr(i, 2), 16));
+            for (let i = 0; i < cleanHex.length; i += 2) {
+              binary += String.fromCharCode(parseInt(cleanHex.substr(i, 2), 16));
             }
             return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
           } catch (_) {}

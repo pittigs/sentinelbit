@@ -136,6 +136,10 @@
       transports: c.transports || []
     }));
 
+    if (options.signal && options.signal.aborted) {
+      return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+    }
+
     return new Promise((resolve, reject) => {
       const timeoutMs = (pk.timeout && pk.timeout > 1000) ? Math.min(pk.timeout, 120000) : 60000;
       const timeoutTimer = setTimeout(() => {
@@ -145,6 +149,16 @@
           origGet.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       }, timeoutMs);
+
+      if (options.signal) {
+        options.signal.addEventListener("abort", () => {
+          if (pendingRequests.has(reqId)) {
+            pendingRequests.delete(reqId);
+            clearTimeout(timeoutTimer);
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          }
+        }, { once: true });
+      }
 
       pendingRequests.set(reqId, {
         resolve: (assertionData) => {
@@ -169,14 +183,18 @@
               function normHexOrB64(bufOrStr) {
                 if (!bufOrStr) return "";
                 if (bufOrStr instanceof ArrayBuffer || bufOrStr instanceof Uint8Array || ArrayBuffer.isView(bufOrStr)) {
-                  return bufferToBase64Url(bufOrStr);
+                  let bytes = bufOrStr instanceof Uint8Array ? bufOrStr : new Uint8Array(bufOrStr.buffer || bufOrStr, bufOrStr.byteOffset || 0, bufOrStr.byteLength);
+                  let binary = "";
+                  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
                 }
                 const s = String(bufOrStr).trim();
-                if (s.length >= 32 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)) {
+                const cleanHex = s.replace(/[^0-9a-fA-F]/g, "");
+                if (cleanHex.length >= 32 && cleanHex.length % 2 === 0 && (s.includes("-") || s.length === cleanHex.length)) {
                   try {
-                    const matchBytes = new Uint8Array(s.length / 2);
-                    for (let i = 0; i < s.length; i += 2) {
-                      matchBytes[i / 2] = parseInt(s.substr(i, 2), 16);
+                    const matchBytes = new Uint8Array(cleanHex.length / 2);
+                    for (let i = 0; i < cleanHex.length; i += 2) {
+                      matchBytes[i / 2] = parseInt(cleanHex.substr(i, 2), 16);
                     }
                     return bufferToBase64Url(matchBytes);
                   } catch (_) {}
@@ -306,6 +324,10 @@
     const cleanUserName = pk.user ? (pk.user.name || "") : "";
     const cleanUserDisplayName = pk.user ? (pk.user.displayName || cleanUserName) : cleanUserName;
 
+    if (options.signal && options.signal.aborted) {
+      return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+    }
+
     return new Promise((resolve, reject) => {
       const timeoutMs = (pk.timeout && pk.timeout > 1000) ? Math.min(pk.timeout, 120000) : 60000;
       const timeoutTimer = setTimeout(() => {
@@ -315,6 +337,16 @@
           origCreate.call(navigator.credentials, options).then(resolve).catch(reject);
         }
       }, timeoutMs);
+
+      if (options.signal) {
+        options.signal.addEventListener("abort", () => {
+          if (pendingRequests.has(reqId)) {
+            pendingRequests.delete(reqId);
+            clearTimeout(timeoutTimer);
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          }
+        }, { once: true });
+      }
 
       pendingRequests.set(reqId, {
         resolve: (attestationData) => {

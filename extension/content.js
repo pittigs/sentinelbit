@@ -2281,6 +2281,20 @@ async function importEcdsaPrivateKey(keyMaterial) {
   throw new Error("Unsupported private key format");
 }
 
+function extractDomain(urlStr) {
+  if (!urlStr) return "";
+  try {
+    let clean = urlStr.trim();
+    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+      clean = "https://" + clean;
+    }
+    const parsed = new URL(clean);
+    return parsed.hostname.toLowerCase().replace(/^www\./, "");
+  } catch (e) {
+    return urlStr.toLowerCase().trim().replace(/^[a-zA-Z]+:\/\//, "").split("/")[0].split(":")[0].replace(/^www\./, "");
+  }
+}
+
 async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
   const privateKeyMaterial = passkey.decrypted_private_key || passkey.encrypted_private_key;
   if (!privateKeyMaterial) throw new Error("Kein privater Schlüssel für Passkey vorhanden");
@@ -2288,14 +2302,20 @@ async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
   const privateKey = await importEcdsaPrivateKey(privateKeyMaterial);
 
   // Derive canonical Relying Party ID:
-  // Prefer passkey.rp_id from vault, or strip www. prefix from origin hostname
-  let targetRpId = (passkey.rp_id || rpId || window.location.hostname || "").toLowerCase().trim();
-  if (targetRpId.startsWith("www.")) {
-    targetRpId = targetRpId.replace(/^www\./, "");
+  // If rpId is provided in WebAuthn request options, THAT is the authority expected by the server!
+  let targetRpId = "";
+  if (rpId && typeof rpId === "string" && rpId.trim().length > 0) {
+    targetRpId = rpId.toLowerCase().trim().replace(/^www\./, "");
+  } else if (passkey.rp_id) {
+    targetRpId = extractDomain(passkey.rp_id);
+  } else {
+    targetRpId = (window.location.hostname || "").toLowerCase().trim().replace(/^www\./, "");
   }
+
+  // Canonicalize subdomains (e.g. if targetRpId is accounts.google.com and passkey is for google.com)
   if (passkey.rp_id) {
-    const pkRp = passkey.rp_id.toLowerCase().trim().replace(/^www\./, "");
-    if (targetRpId === pkRp || targetRpId.endsWith("." + pkRp)) {
+    const pkRp = extractDomain(passkey.rp_id);
+    if (pkRp && targetRpId.endsWith("." + pkRp)) {
       targetRpId = pkRp;
     }
   }
@@ -2347,7 +2367,7 @@ async function signWebAuthnAssertion(passkey, rpId, challengeB64) {
 
 async function buildCborAttestationObject(rpId, credIdBytes, xBytes, yBytes, signCount = 0) {
   const rpIdHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rpId));
-  const flags = new Uint8Array([0x45]); // UP (0x01) | UV (0x04) | AT (0x40)
+  const flags = new Uint8Array([0x5d]); // UP (0x01) | UV (0x04) | BE (0x08) | BS (0x10) | AT (0x40)
   const countBytes = new Uint8Array(4);
   countBytes[0] = (signCount >> 24) & 0xff;
   countBytes[1] = (signCount >> 16) & 0xff;
