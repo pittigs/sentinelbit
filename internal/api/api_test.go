@@ -437,6 +437,33 @@ func TestSyncSettingsAndGDriveAPI(t *testing.T) {
 	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusOK {
 		t.Errorf("Expected 400 or 200, got %d", rr.Code)
 	}
+
+	// 5. Test Google Drive OAuth Auth-URL endpoint
+	req = httptest.NewRequest(http.MethodGet, "/api/sync/gdrive/auth-url?client_id=myclient.apps.googleusercontent.com&client_secret=mysecret", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /api/sync/gdrive/auth-url, got %d", rr.Code)
+	}
+	var oauthRes map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &oauthRes); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	if oauthRes["status"] != "ok" || oauthRes["auth_url"] == "" || oauthRes["redirect_uri"] == "" {
+		t.Errorf("Unexpected auth-url response: %+v", oauthRes)
+	}
+
+	// 6. Test Google Drive OAuth Callback endpoint with error parameter
+	req = httptest.NewRequest(http.MethodGet, "/api/sync/gdrive/callback?error=access_denied", nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200 HTML response for /api/sync/gdrive/callback error, got %d", rr.Code)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("Google Autorisierung abgebrochen")) {
+		t.Errorf("Expected cancellation message in HTML callback response")
+	}
 }
 
 

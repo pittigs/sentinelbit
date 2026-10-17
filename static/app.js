@@ -3711,6 +3711,35 @@ async function openSyncSettingsModal() {
         document.getElementById("sync-gdrive-creds").value = data.gdrive_credentials || "";
         toggleGDriveFields();
 
+        const redirEl = document.getElementById("gdrive-redirect-uri-display");
+        if (redirEl) {
+          redirEl.innerText = `${window.location.origin}/api/sync/gdrive/callback`;
+        }
+
+        const oauthStatus = document.getElementById("gdrive-oauth-status");
+        if (oauthStatus) oauthStatus.innerText = "";
+
+        if (data.gdrive_credentials) {
+          try {
+            const parsed = JSON.parse(data.gdrive_credentials);
+            if (parsed.type === "authorized_user") {
+              if (parsed.client_id) document.getElementById("sync-gdrive-client-id").value = parsed.client_id;
+              if (parsed.client_secret) document.getElementById("sync-gdrive-client-secret").value = parsed.client_secret;
+              if (oauthStatus) {
+                oauthStatus.innerText = "✓ Verbunden";
+                oauthStatus.style.color = "#34d399";
+              }
+              switchGDriveTab("oauth");
+            } else {
+              switchGDriveTab("manual");
+            }
+          } catch (e) {
+            switchGDriveTab("manual");
+          }
+        } else {
+          switchGDriveTab("oauth");
+        }
+
         const envHint = document.getElementById("gdrive-env-hint");
         if (envHint) {
           if (data.has_env_credentials) {
@@ -3733,6 +3762,126 @@ async function openSyncSettingsModal() {
     showToast("Fehler beim Laden der Sync-Einstellungen: " + err.message, "error");
   }
 }
+
+function switchGDriveTab(tab) {
+  const oauthTab = document.getElementById("gdrive-tab-oauth");
+  const manualTab = document.getElementById("gdrive-tab-manual");
+  const btnOauth = document.getElementById("tab-btn-oauth");
+  const btnManual = document.getElementById("tab-btn-manual");
+  if (!oauthTab || !manualTab) return;
+
+  if (tab === "oauth") {
+    oauthTab.style.display = "flex";
+    manualTab.style.display = "none";
+    if (btnOauth) {
+      btnOauth.style.background = "rgba(56, 189, 248, 0.2)";
+      btnOauth.style.color = "#38bdf8";
+      btnOauth.style.fontWeight = "600";
+    }
+    if (btnManual) {
+      btnManual.style.background = "transparent";
+      btnManual.style.color = "var(--text-dim)";
+      btnManual.style.fontWeight = "normal";
+    }
+  } else {
+    oauthTab.style.display = "none";
+    manualTab.style.display = "flex";
+    if (btnManual) {
+      btnManual.style.background = "rgba(56, 189, 248, 0.2)";
+      btnManual.style.color = "#38bdf8";
+      btnManual.style.fontWeight = "600";
+    }
+    if (btnOauth) {
+      btnOauth.style.background = "transparent";
+      btnOauth.style.color = "var(--text-dim)";
+      btnOauth.style.fontWeight = "normal";
+    }
+  }
+}
+
+async function startGDriveOAuth() {
+  const clientId = document.getElementById("sync-gdrive-client-id").value.trim();
+  const clientSecret = document.getElementById("sync-gdrive-client-secret").value.trim();
+  const statusEl = document.getElementById("gdrive-oauth-status");
+
+  if (!clientId || !clientSecret) {
+    showToast("Bitte gib zuerst Client-ID und Client-Secret ein.", "warning");
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.innerText = "Öffne Google-Login...";
+    statusEl.style.color = "#38bdf8";
+  }
+
+  try {
+    const res = await fetch(`/api/sync/gdrive/auth-url?client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`, {
+      headers: {
+        "Authorization": `Bearer ${sessionToken}`
+      }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.message || "Fehler beim Anfordern der Google-Auth-URL");
+
+    const width = 600;
+    const height = 700;
+    const left = window.screenLeft + (window.outerWidth - width) / 2;
+    const top = window.screenTop + (window.outerHeight - height) / 2;
+    const popup = window.open(data.auth_url, "gdrive_oauth", `width=${width},height=${height},top=${top},left=${left}`);
+
+    if (!popup || popup.closed || typeof popup.closed === "undefined") {
+      showToast("Popup wurde blockiert! Bitte Popups im Browser für diese Seite erlauben.", "error");
+      if (statusEl) {
+        statusEl.innerText = "Popup blockiert";
+        statusEl.style.color = "#f87171";
+      }
+      return;
+    }
+
+    if (statusEl) {
+      statusEl.innerText = "Warte auf Bestätigung...";
+    }
+  } catch (err) {
+    showToast("OAuth-Fehler: " + err.message, "error");
+    if (statusEl) {
+      statusEl.innerText = "Fehler";
+      statusEl.style.color = "#f87171";
+    }
+  }
+}
+
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "gdrive_auth_result") {
+    const statusEl = document.getElementById("gdrive-oauth-status");
+    if (event.data.success) {
+      showToast("Google Drive erfolgreich autorisiert!", "success");
+      if (statusEl) {
+        statusEl.innerText = "✓ Verbunden";
+        statusEl.style.color = "#34d399";
+      }
+      const gdriveCheck = document.getElementById("sync-gdrive-enabled");
+      if (gdriveCheck) gdriveCheck.checked = true;
+
+      fetch("/api/sync/settings", {
+        headers: { "Authorization": `Bearer ${sessionToken}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.gdrive_credentials) {
+          const credsEl = document.getElementById("sync-gdrive-creds");
+          if (credsEl) credsEl.value = data.gdrive_credentials;
+        }
+      })
+      .catch(() => {});
+    } else {
+      showToast("Google Drive Autorisierung fehlgeschlagen.", "error");
+      if (statusEl) {
+        statusEl.innerText = "✗ Fehler bei Autorisierung";
+        statusEl.style.color = "#f87171";
+      }
+    }
+  }
+});
 
 function toggleGDriveFields() {
   const gdriveCheck = document.getElementById("sync-gdrive-enabled");

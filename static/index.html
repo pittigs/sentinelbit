@@ -1083,7 +1083,7 @@
             </label>
           </div>
 
-          <div id="gdrive-config-panel" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px;">
+          <div id="gdrive-config-panel" style="display: none; flex-direction: column; gap: 12px; margin-top: 10px;">
             <div class="form-group" style="margin-bottom: 0;">
               <label for="sync-gdrive-folder" style="font-size: 0.78rem;">Google Drive Ordner-ID oder Web-URL</label>
               <input type="text" id="sync-gdrive-folder" class="form-input" placeholder="z. B. 1a2B3c4D... oder Ordner-Link aus dem Browser">
@@ -1092,22 +1092,58 @@
               </p>
             </div>
 
-            <div class="form-group" style="margin-bottom: 0;">
-              <label for="sync-gdrive-creds" style="font-size: 0.78rem;">Service Account Key (JSON-Schlüsseldatei oder Pfad)</label>
-              <textarea id="sync-gdrive-creds" class="form-input" rows="3" style="font-family: monospace; font-size: 0.75rem; resize: vertical;" placeholder='{"type": "service_account", ...} oder Dateipfad wie /data/gdrive-service-account.json'></textarea>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; flex-wrap: wrap; gap: 6px;">
-                <span id="gdrive-env-hint" style="font-size: 0.72rem; color: var(--text-dim);">
-                  Wird leer gelassen, falls bereits auf dem Server hinterlegt.
-                </span>
-                <label class="btn btn-secondary" style="font-size: 0.75rem; padding: 3px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
-                  <svg viewBox="0 0 24 24" style="width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                  JSON-Datei wählen
-                  <input type="file" id="sync-gdrive-file-input" accept=".json" style="display: none;" onchange="loadGDriveKeyFile(event)">
-                </label>
+            <!-- Auth Mode Switcher -->
+            <div style="display: flex; gap: 6px; background: rgba(0,0,0,0.25); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <button type="button" id="tab-btn-oauth" class="btn" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: none; border-radius: 4px; font-weight: 600;" onclick="switchGDriveTab('oauth')">
+                OAuth 2.0 (Gmail / Persönlich)
+              </button>
+              <button type="button" id="tab-btn-manual" class="btn" style="flex: 1; font-size: 0.75rem; padding: 4px 8px; background: transparent; color: var(--text-dim); border: none; border-radius: 4px;" onclick="switchGDriveTab('manual')">
+                Service Account (Workspace)
+              </button>
+            </div>
+
+            <!-- OAuth Tab -->
+            <div id="gdrive-tab-oauth" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>
+                  <label for="sync-gdrive-client-id" style="font-size: 0.75rem;">OAuth Client-ID</label>
+                  <input type="text" id="sync-gdrive-client-id" class="form-input" placeholder="xxxx.apps.googleusercontent.com" style="font-size: 0.75rem;">
+                </div>
+                <div>
+                  <label for="sync-gdrive-client-secret" style="font-size: 0.75rem;">Client-Secret</label>
+                  <input type="password" id="sync-gdrive-client-secret" class="form-input" placeholder="GOCSPX-xxxx" style="font-size: 0.75rem;">
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-primary" style="font-size: 0.8rem; padding: 5px 12px; display: inline-flex; align-items: center; gap: 6px;" onclick="startGDriveOAuth()">
+                  <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor;"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>
+                  Mit Google verbinden & autorisieren
+                </button>
+                <span id="gdrive-oauth-status" style="font-size: 0.75rem; color: #34d399; font-weight: 500;"></span>
+              </div>
+              <p style="font-size: 0.7rem; color: var(--text-dim); margin: 0;">
+                Redirect-URI für Google Console: <code style="color: #38bdf8;" id="gdrive-redirect-uri-display">https://vault.pittigs.eu/api/sync/gdrive/callback</code>
+              </p>
+            </div>
+
+            <!-- Manual / Service Account Tab -->
+            <div id="gdrive-tab-manual" style="display: none; flex-direction: column; gap: 8px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="sync-gdrive-creds" style="font-size: 0.75rem;">Credentials JSON oder Dateipfad</label>
+                <textarea id="sync-gdrive-creds" class="form-input" rows="3" style="font-family: monospace; font-size: 0.72rem; resize: vertical;" placeholder='{"type": "authorized_user", ...} oder Service Account JSON'></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px; flex-wrap: wrap; gap: 6px;">
+                  <span id="gdrive-env-hint" style="font-size: 0.7rem; color: var(--text-dim);">
+                    Wird leer gelassen, falls bereits auf dem Server hinterlegt.
+                  </span>
+                  <label class="btn btn-secondary" style="font-size: 0.75rem; padding: 2px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                    JSON-Datei wählen
+                    <input type="file" id="sync-gdrive-file-input" accept=".json" style="display: none;" onchange="loadGDriveKeyFile(event)">
+                  </label>
+                </div>
               </div>
             </div>
 
-            <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
               <button type="button" class="btn btn-secondary" style="font-size: 0.8rem; padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px;" onclick="testGDriveConnection()">
                 <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2;"><polyline points="20 6 9 17 4 12"/></svg> Verbindung testen
               </button>

@@ -115,9 +115,9 @@ func (g *GDriveUploader) TestConnection(ctx context.Context) (string, error) {
 	}
 
 	if folderID != "" {
-		folder, err := srv.Files.Get(folderID).Fields("id, name, mimeType, trashed").Do()
+		folder, err := srv.Files.Get(folderID).Fields("id, name, mimeType, trashed").SupportsAllDrives(true).Do()
 		if err != nil {
-			return "", fmt.Errorf("Google Drive Ordner (ID: %s) nicht erreichbar. Bitte sicherstellen, dass der Ordner für die Service-Account-E-Mail freigegeben ist: %w", folderID, err)
+			return "", fmt.Errorf("Google Drive Ordner (ID: %s) nicht erreichbar. Bitte sicherstellen, dass der Ordner freigegeben ist: %w", folderID, err)
 		}
 		if folder.Trashed {
 			return "", fmt.Errorf("Google Drive Ordner '%s' befindet sich im Papierkorb", folder.Name)
@@ -159,7 +159,7 @@ func (g *GDriveUploader) UploadBackup(ctx context.Context, localFilePath, safeUs
 		driveFile.Parents = []string{folderID}
 	}
 
-	if _, err := srv.Files.Create(driveFile).Media(f).Do(); err != nil {
+	if _, err := srv.Files.Create(driveFile).Media(f).SupportsAllDrives(true).Do(); err != nil {
 		return fmt.Errorf("Upload nach Google Drive fehlgeschlagen: %w", err)
 	}
 
@@ -173,9 +173,9 @@ func (g *GDriveUploader) UploadBackup(ctx context.Context, localFilePath, safeUs
 			queryLatest = fmt.Sprintf("'%s' in parents and %s", folderID, queryLatest)
 		}
 
-		res, err := srv.Files.List().Q(queryLatest).Fields("files(id)").PageSize(1).Do()
+		res, err := srv.Files.List().Q(queryLatest).Fields("files(id)").PageSize(1).SupportsAllDrives(true).IncludeItemsFromAllDrives(true).Do()
 		if err == nil && len(res.Files) > 0 {
-			_, _ = srv.Files.Update(res.Files[0].Id, nil).Media(latestData).Do()
+			_, _ = srv.Files.Update(res.Files[0].Id, nil).Media(latestData).SupportsAllDrives(true).Do()
 		} else {
 			latestDriveFile := &drive.File{
 				Name:     latestName,
@@ -184,7 +184,7 @@ func (g *GDriveUploader) UploadBackup(ctx context.Context, localFilePath, safeUs
 			if folderID != "" {
 				latestDriveFile.Parents = []string{folderID}
 			}
-			_, _ = srv.Files.Create(latestDriveFile).Media(latestData).Do()
+			_, _ = srv.Files.Create(latestDriveFile).Media(latestData).SupportsAllDrives(true).Do()
 		}
 	}
 
@@ -194,7 +194,7 @@ func (g *GDriveUploader) UploadBackup(ctx context.Context, localFilePath, safeUs
 		if folderID != "" {
 			query = fmt.Sprintf("'%s' in parents and %s", folderID, query)
 		}
-		listCall := srv.Files.List().Q(query).Fields("files(id, name, createdTime)").OrderBy("createdTime desc").PageSize(100)
+		listCall := srv.Files.List().Q(query).Fields("files(id, name, createdTime)").OrderBy("createdTime desc").PageSize(100).SupportsAllDrives(true).IncludeItemsFromAllDrives(true)
 		fileList, err := listCall.Do()
 		if err == nil {
 			var timestampedFiles []*drive.File
@@ -205,7 +205,7 @@ func (g *GDriveUploader) UploadBackup(ctx context.Context, localFilePath, safeUs
 			}
 			if len(timestampedFiles) > retentionCount {
 				for _, oldFile := range timestampedFiles[retentionCount:] {
-					_ = srv.Files.Delete(oldFile.Id).Do()
+					_ = srv.Files.Delete(oldFile.Id).SupportsAllDrives(true).Do()
 				}
 			}
 		}
