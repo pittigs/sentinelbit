@@ -13,6 +13,10 @@ services:
       # Nach deiner Erstregistrierung auf 'true' setzen:
       - SENTINELBIT_DISABLE_REGISTRATION=false
       - SENTINELBIT_LOG_LEVEL=info
+      # Optional: Google Drive Backup via Env (kann auch bequem im Web-Tresor konfiguriert werden):
+      # - SENTINELBIT_GDRIVE_ENABLED=true
+      # - SENTINELBIT_GDRIVE_FOLDER_ID=deine-google-drive-ordner-id
+      # - SENTINELBIT_GDRIVE_CREDENTIALS_FILE=/data/gdrive-service-account.json
     labels:
       traefik.enable: "true"
       traefik.docker.network: "traefik_proxy"
@@ -27,41 +31,11 @@ services:
       - traefik_proxy
     volumes:
       - sentinelbit-data:/data
+      # Optional: Service Account JSON-Schlüsseldatei mounten:
+      # - ./gdrive-service-account.json:/data/gdrive-service-account.json:ro
 
-  rclone-backup:
-    image: rclone/rclone:latest
-    container_name: sentinelbit_rclone
-    restart: unless-stopped
-    environment:
-      - TZ=Europe/Berlin
-      - RCLONE_DIR=/data/backups
-      - RCLONE_REMOTE=gdrive:SentinelBit-Backups
-      - SYNC_INTERVAL=1m
-    volumes:
-      - sentinelbit-data:/data:ro
-      - ./rclone:/config/rclone:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "🚀 [rclone] SentinelBit Google Drive Backup Companion gestartet."
-        while true; do
-          if [ ! -f /config/rclone/rclone.conf ]; then
-            echo "⚠️ [rclone] Keine rclone.conf in ./rclone gefunden! Bitte einmalig 'docker run --rm -it -v $$(pwd)/rclone:/config/rclone rclone/rclone config' ausführen."
-            sleep 60
-            continue
-          fi
-          if [ -d "$$RCLONE_DIR" ] && [ "$$(ls -A "$$RCLONE_DIR" 2>/dev/null)" ]; then
-            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Starte Backup-Upload nach $$RCLONE_REMOTE..."
-            rclone copy "$$RCLONE_DIR" "$$RCLONE_REMOTE" --verbose
-            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Upload erfolgreich abgeschlossen."
-          else
-            echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Noch keine Backups in $$RCLONE_DIR vorhanden (im Web-Tresor unter Einstellungen aktivieren). Warte..."
-          fi
-          echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Nächster Sync in $$SYNC_INTERVAL."
-          sleep "$$SYNC_INTERVAL"
-        done
-    networks:
-      - default
+  # HINWEIS: rclone-backup wird nicht mehr benötigt!
+  # Google Drive Uploads werden nun nativ direkt von SentinelBit ausgeführt.
 
 volumes:
   sentinelbit-data:

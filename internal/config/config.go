@@ -14,6 +14,9 @@ type Config struct {
 	LogLevel            string
 	ForwardAuthEnabled  bool
 	ForwardAuthHeader   string
+	GDriveEnabled       bool
+	GDriveFolderID      string
+	GDriveCredentials   string
 }
 
 // Load reads configuration from environment variables with sensible defaults
@@ -54,6 +57,18 @@ func Load() *Config {
 		faHeader = "X-Remote-User"
 	}
 
+	gdriveEnv := os.Getenv("SENTINELBIT_GDRIVE_ENABLED")
+	gdriveEnabled := strings.EqualFold(gdriveEnv, "true") || gdriveEnv == "1"
+
+	gdriveFolderID := os.Getenv("SENTINELBIT_GDRIVE_FOLDER_ID")
+	gdriveCreds := os.Getenv("SENTINELBIT_GDRIVE_CREDENTIALS")
+	if gdriveCreds == "" {
+		gdriveCreds = os.Getenv("SENTINELBIT_GDRIVE_CREDENTIALS_FILE")
+	}
+	if gdriveCreds == "" {
+		gdriveCreds = os.Getenv("SENTINELBIT_GDRIVE_CREDENTIALS_JSON")
+	}
+
 	return &Config{
 		Port:                port,
 		Host:                host,
@@ -62,5 +77,8 @@ func Load() *Config {
 		LogLevel:            logLevel,
 		ForwardAuthEnabled:  forwardAuthEnabled,
 		ForwardAuthHeader:   faHeader,
+		GDriveEnabled:       gdriveEnabled,
+		GDriveFolderID:      gdriveFolderID,
+		GDriveCredentials:   gdriveCreds,
 	}
 }

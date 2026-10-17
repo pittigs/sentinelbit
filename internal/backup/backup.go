@@ -130,12 +130,14 @@ func (be *BackupEngine) ExecuteBackup(userId string, isChangeTriggered bool) (st
 	}
 
 	var targetDir string
-	var retentionCount, syncOnChange int
+	var retentionCount, syncOnChange, gdriveEnabled int
+	var gdriveFolderId, gdriveCredentials sql.NullString
 	err = database.QueryRow(`
-		SELECT target_dir, retention_count, sync_on_change
+		SELECT target_dir, retention_count, sync_on_change,
+		       COALESCE(gdrive_enabled, 0), COALESCE(gdrive_folder_id, ''), COALESCE(gdrive_credentials, '')
 		FROM backup_sync_settings
 		WHERE user_id = ? AND is_active = 1
-	`, userId).Scan(&targetDir, &retentionCount, &syncOnChange)
+	`, userId).Scan(&targetDir, &retentionCount, &syncOnChange, &gdriveEnabled, &gdriveFolderId, &gdriveCredentials)
 
 	if err != nil {
 		return "", fmt.Errorf("no active backup config: %w", err)
@@ -303,11 +305,36 @@ func (be *BackupEngine) ExecuteBackup(userId string, isChangeTriggered bool) (st
 		}
 	}
 
+	syncStatus := "Erfolgreich lokal gesichert"
+
+	// Native Google Drive Upload
+	isGDrive := gdriveEnabled == 1 || strings.EqualFold(os.Getenv("SENTINELBIT_GDRIVE_ENABLED"), "true")
+	if isGDrive {
+		creds := gdriveCredentials.String
+		folderID := gdriveFolderId.String
+		uploader := NewGDriveUploader(creds, folderID)
+		if uploader.IsConfigured() {
+			if err := uploader.UploadBackup(context.Background(), destFile, safeName, retentionCount); err != nil {
+				syncStatus = fmt.Sprintf("Lokal gesichert, Google Drive Fehler: %v", err)
+			} else {
+				syncStatus = "Erfolgreich lokal & nach Google Drive synchronisiert"
+			}
+		} else {
+			syncStatus = "Lokal gesichert (Google Drive aktiv, aber keine Anmeldedaten hinterlegt)"
+		}
+	}
+
+	// Optional WebDAV remote upload
+	webdavUploader := NewStorageUploader()
+	if webdavUploader.WebDAVURL != "" {
+		_ = webdavUploader.UploadSnapshotToWebDAV(destFile, filepath.Base(destFile))
+	}
+
 	_, _ = database.Exec(`
 		UPDATE backup_sync_settings
-		SET last_synced_at = ?, last_sync_status = 'Erfolgreich synchronisiert'
+		SET last_synced_at = ?, last_sync_status = ?
 		WHERE user_id = ?
-	`, nowISO, userId)
+	`, nowISO, syncStatus, userId)
 
 	return destFile, nil
 }

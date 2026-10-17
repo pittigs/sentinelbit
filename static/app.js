@@ -3703,10 +3703,88 @@ async function openSyncSettingsModal() {
       document.getElementById("sync-on-change").checked = data.sync_on_change;
       document.getElementById("sync-last-time").innerText = data.last_synced_at ? new Date(data.last_synced_at).toLocaleString() : "Noch nie";
       document.getElementById("sync-last-status").innerText = data.last_sync_status || "Bereit";
+
+      const gdriveCheck = document.getElementById("sync-gdrive-enabled");
+      if (gdriveCheck) {
+        gdriveCheck.checked = !!data.gdrive_enabled;
+        document.getElementById("sync-gdrive-folder").value = data.gdrive_folder_id || "";
+        document.getElementById("sync-gdrive-creds").value = data.gdrive_credentials || "";
+        toggleGDriveFields();
+
+        const envHint = document.getElementById("gdrive-env-hint");
+        if (envHint) {
+          if (data.has_env_credentials) {
+            envHint.innerText = "✓ Anmeldedaten auf Server-Ebene (Env / Docker) aktiv.";
+            envHint.style.color = "#34d399";
+          } else if (data.has_saved_creds) {
+            envHint.innerText = "✓ Schlüssel bereits im Tresor hinterlegt.";
+            envHint.style.color = "#34d399";
+          } else {
+            envHint.innerText = "Wird leer gelassen, falls bereits auf dem Server hinterlegt.";
+            envHint.style.color = "var(--text-dim)";
+          }
+        }
+        const testRes = document.getElementById("gdrive-test-result");
+        if (testRes) testRes.style.display = "none";
+      }
     }
     openModal("modal-sync");
   } catch (err) {
     showToast("Fehler beim Laden der Sync-Einstellungen: " + err.message, "error");
+  }
+}
+
+function toggleGDriveFields() {
+  const gdriveCheck = document.getElementById("sync-gdrive-enabled");
+  const panel = document.getElementById("gdrive-config-panel");
+  if (panel && gdriveCheck) {
+    panel.style.display = gdriveCheck.checked ? "flex" : "none";
+  }
+}
+
+function loadGDriveKeyFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target.result;
+    document.getElementById("sync-gdrive-creds").value = content;
+    showToast("Service Account Schlüssel geladen!", "info");
+  };
+  reader.readAsText(file);
+}
+
+async function testGDriveConnection() {
+  const creds = document.getElementById("sync-gdrive-creds").value.trim();
+  const folder = document.getElementById("sync-gdrive-folder").value.trim();
+  const resultEl = document.getElementById("gdrive-test-result");
+  resultEl.style.display = "inline";
+  resultEl.style.color = "var(--text-dim)";
+  resultEl.innerText = "Prüfe Verbindung...";
+
+  try {
+    const res = await fetch("/api/sync/gdrive/test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${sessionToken}`
+      },
+      body: JSON.stringify({ credentials: creds, folder_id: folder })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      resultEl.style.color = "#34d399";
+      resultEl.innerText = "✓ " + (data.message || "Verbindung erfolgreich!");
+      showToast("Google Drive Verbindung erfolgreich!", "success");
+    } else {
+      resultEl.style.color = "#f87171";
+      resultEl.innerText = "✗ " + (data.message || "Fehler");
+      showToast("Google Drive Fehler: " + (data.message || "Unbekannt"), "error");
+    }
+  } catch (err) {
+    resultEl.style.color = "#f87171";
+    resultEl.innerText = "✗ " + err.message;
+    showToast("Fehler beim Testen: " + err.message, "error");
   }
 }
 
@@ -3717,6 +3795,11 @@ async function saveSyncSettings(e) {
   const interval = parseInt(document.getElementById("sync-interval").value, 10);
   const retention = parseInt(document.getElementById("sync-retention").value, 10);
   const onChange = document.getElementById("sync-on-change").checked;
+
+  const gdriveCheck = document.getElementById("sync-gdrive-enabled");
+  const gdriveEnabled = gdriveCheck ? gdriveCheck.checked : false;
+  const gdriveFolder = document.getElementById("sync-gdrive-folder") ? document.getElementById("sync-gdrive-folder").value.trim() : "";
+  const gdriveCreds = document.getElementById("sync-gdrive-creds") ? document.getElementById("sync-gdrive-creds").value.trim() : "";
 
   try {
     const res = await fetch("/api/sync/settings", {
@@ -3730,11 +3813,14 @@ async function saveSyncSettings(e) {
         interval_minutes: interval,
         sync_on_change: onChange,
         retention_count: retention,
-        is_active: active
+        is_active: active,
+        gdrive_enabled: gdriveEnabled,
+        gdrive_folder_id: gdriveFolder,
+        gdrive_credentials: gdriveCreds
       })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Fehler beim Speichern");
+    if (!res.ok) throw new Error(data.detail || data.message || "Fehler beim Speichern");
 
     showToast("Backup- & Sync-Plan gespeichert!", "success");
     closeModal("modal-sync");

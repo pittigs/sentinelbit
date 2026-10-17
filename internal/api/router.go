@@ -130,6 +130,7 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 		api.Get("/sync/settings", RequireAuth(HandleGetSyncSettings(database)))
 		api.Post("/sync/settings", RequireAuth(HandleSaveSyncSettings(database)))
 		api.Post("/sync/now", RequireAuth(HandleTriggerSyncNow))
+		api.Post("/sync/gdrive/test", RequireAuth(HandleTestGDriveConnection(database)))
 		api.Get("/sync/events", HandleSyncEvents(database))
 
 		// Self-Hosted Privacy Favicon Cache

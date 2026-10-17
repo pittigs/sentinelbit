@@ -315,3 +315,128 @@ func TestPrometheusMetricsAndSecureSend(t *testing.T) {
 	}
 }
 
+func TestSyncSettingsAndGDriveAPI(t *testing.T) {
+	database, tempDir := setupTestDB(t)
+	defer database.Close()
+	defer os.RemoveAll(tempDir)
+
+	cfg := &config.Config{
+		Host: "127.0.0.1",
+		Port: "8000",
+	}
+	api.InitAPI(cfg, database)
+	router := api.SetupRouter(database, cfg)
+
+	// Register & Login
+	username := "syncuser"
+	authSalt := "test_auth_salt_sync"
+	encSalt := "test_enc_salt_sync"
+	clientAuthKeyHex := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+	regPayload := models.RegisterRequest{
+		Username: username,
+		AuthSalt: authSalt,
+		AuthHash: clientAuthKeyHex,
+		EncSalt:  encSalt,
+	}
+	body, _ := json.Marshal(regPayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Register failed: %d", rr.Code)
+	}
+
+	verifyPayload := models.LoginVerifyRequest{
+		Username:      username,
+		ClientAuthKey: clientAuthKeyHex,
+	}
+	body, _ = json.Marshal(verifyPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login-verify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Login-verify failed: %d", rr.Code)
+	}
+
+	var verifyRes models.LoginResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &verifyRes)
+	token := verifyRes.Token
+
+	// 1. Get default sync settings
+	req = httptest.NewRequest(http.MethodGet, "/api/sync/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Get sync settings failed: %d", rr.Code)
+	}
+	var getRes map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &getRes)
+	if _, ok := getRes["has_env_credentials"]; !ok {
+		t.Errorf("Expected has_env_credentials key in response")
+	}
+
+	// 2. Save sync settings with GDrive config and URL folder
+	backupDir := filepath.Join(tempDir, "backups")
+	_ = os.MkdirAll(backupDir, 0755)
+	savePayload := models.BackupSyncSettingsModel{
+		TargetDir:         backupDir,
+		IntervalMinutes:   30,
+		SyncOnChange:      true,
+		RetentionCount:    5,
+		IsActive:          true,
+		GDriveEnabled:     true,
+		GDriveFolderID:    "https://drive.google.com/drive/folders/gdrive-folder-abc12345?usp=sharing",
+		GDriveCredentials: `{"type": "service_account", "project_id": "test"}`,
+	}
+	body, _ = json.Marshal(savePayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/sync/settings", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Save sync settings failed: %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	// 3. Verify settings saved and URL cleaned to folder ID
+	req = httptest.NewRequest(http.MethodGet, "/api/sync/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Get saved sync settings failed: %d", rr.Code)
+	}
+	var savedRes map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &savedRes)
+	if savedRes["gdrive_enabled"] != true {
+		t.Errorf("Expected gdrive_enabled=true, got %v", savedRes["gdrive_enabled"])
+	}
+	if savedRes["gdrive_folder_id"] != "gdrive-folder-abc12345" {
+		t.Errorf("Expected gdrive_folder_id='gdrive-folder-abc12345', got %v", savedRes["gdrive_folder_id"])
+	}
+	if savedRes["has_saved_creds"] != true {
+		t.Errorf("Expected has_saved_creds=true, got %v", savedRes["has_saved_creds"])
+	}
+
+	// 4. Test Google Drive Connection endpoint
+	testPayload := map[string]string{
+		"folder_id":   "gdrive-folder-abc12345",
+		"credentials": `{"type": "service_account"}`,
+	}
+	body, _ = json.Marshal(testPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/sync/gdrive/test", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	// Should return error (since mock service account key is invalid), but handle gracefully without 500 panic
+	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusOK {
+		t.Errorf("Expected 400 or 200, got %d", rr.Code)
+	}
+}
+
+

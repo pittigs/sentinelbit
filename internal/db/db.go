@@ -160,6 +160,9 @@ func runMigrations(db *sql.DB) error {
 		is_active INTEGER DEFAULT 1,
 		last_synced_at TEXT,
 		last_sync_status TEXT,
+		gdrive_enabled INTEGER DEFAULT 0,
+		gdrive_folder_id TEXT DEFAULT '',
+		gdrive_credentials TEXT DEFAULT '',
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
 
@@ -281,6 +284,9 @@ func runMigrations(db *sql.DB) error {
 
 	ensureColumnExists(db, "vault_items", "deleted_at", "TEXT DEFAULT NULL")
 	ensureColumnExists(db, "passkeys", "deleted_at", "TEXT DEFAULT NULL")
+	ensureColumnExists(db, "backup_sync_settings", "gdrive_enabled", "INTEGER DEFAULT 0")
+	ensureColumnExists(db, "backup_sync_settings", "gdrive_folder_id", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "backup_sync_settings", "gdrive_credentials", "TEXT DEFAULT ''")
 
 	_, _ = db.Exec("PRAGMA user_version = 2;")
 	return nil

@@ -67,6 +67,7 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
   * Nahtloser 1-Klick-Import aus **Bitwarden** (JSON/CSV), **1Password** (1PUX/CSV), **KeePassXC** (CSV), **LastPass** sowie **Google Chrome** & **Mozilla Firefox**.
 * 🔄 **Automatisierter Backup & Sync-Dienst**:
   * Isolierte, benutzerspezifische Backups mit konfigurierbarer Dateirotation und Retention.
+  * **Nativer Google Drive Cloud-Upload**: Automatischer Upload verschlüsselter Snapshots nach Google Drive (inkl. Cloud-Retention) ganz ohne Drittanbieter-Tools wie rclone.
 * 🎭 **E-Mail-Maskierung ("Hide My Email")**:
   * Generiere auf Knopfdruck zufällige Relay-Aliase für Online-Registrierungen.
 * 🤝 **Asymmetrisches E2E Tresor-Sharing**:

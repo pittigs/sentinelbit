@@ -121,11 +121,14 @@ type WebAuthnKeyRegisterRequest struct {
 
 // Backup Settings
 type BackupSyncSettingsModel struct {
-	TargetDir       string `json:"target_dir"`
-	IntervalMinutes int    `json:"interval_minutes"`
-	SyncOnChange    bool   `json:"sync_on_change"`
-	RetentionCount  int    `json:"retention_count"`
-	IsActive        bool   `json:"is_active"`
+	TargetDir         string `json:"target_dir"`
+	IntervalMinutes   int    `json:"interval_minutes"`
+	SyncOnChange      bool   `json:"sync_on_change"`
+	RetentionCount    int    `json:"retention_count"`
+	IsActive          bool   `json:"is_active"`
+	GDriveEnabled     bool   `json:"gdrive_enabled"`
+	GDriveFolderID    string `json:"gdrive_folder_id"`
+	GDriveCredentials string `json:"gdrive_credentials"`
 }
 
 // Email Aliases
