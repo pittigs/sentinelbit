@@ -68,6 +68,8 @@ Ein hochmoderner, selbst gehosteter **Zero-Knowledge Passwort- & Passkey-Manager
 * 🔄 **Automatisierter Backup & Sync-Dienst**:
   * Isolierte, benutzerspezifische Backups mit konfigurierbarer Dateirotation und Retention.
   * **Nativer Google Drive Cloud-Upload**: Automatischer Upload verschlüsselter Snapshots nach Google Drive (inkl. Cloud-Retention) ganz ohne Drittanbieter-Tools wie rclone.
+* 🛡️ **Bitwarden API-Kompatibilität**:
+  * Verbinde offizielle **Bitwarden Browser-Erweiterungen** (Chrome, Firefox, Safari, Edge), **Desktop-Apps** und **Mobile Apps (iOS & Android)** direkt mit deinem SentinelBit-Server (einfach in den Client-Einstellungen die Server-URL eintragen).
 * 🎭 **E-Mail-Maskierung ("Hide My Email")**:
   * Generiere auf Knopfdruck zufällige Relay-Aliase für Online-Registrierungen.
 * 🤝 **Asymmetrisches E2E Tresor-Sharing**:

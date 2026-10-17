@@ -249,22 +249,69 @@ func (be *BackupEngine) ExecuteBackup(userId string, isChangeTriggered bool) (st
 		}
 	}
 
+	// 4. Bitwarden Ciphers & Folders
+	bwFoldersRows, _ := database.Query("SELECT id, name, revision_date FROM bw_folders WHERE user_id = ?", userId)
+	bwFolders := make([]map[string]interface{}, 0)
+	if bwFoldersRows != nil {
+		defer bwFoldersRows.Close()
+		for bwFoldersRows.Next() {
+			var id, name, rev string
+			if err := bwFoldersRows.Scan(&id, &name, &rev); err == nil {
+				bwFolders = append(bwFolders, map[string]interface{}{"id": id, "name": name, "revision_date": rev})
+			}
+		}
+	}
+
+	bwCiphersRows, _ := database.Query(`
+		SELECT id, folder_id, type, name, notes, favorite, login_data, secure_note_data, card_data, identity_data, fields, reprompt, revision_date
+		FROM bw_ciphers WHERE user_id = ? AND (deleted_date IS NULL OR deleted_date = '')
+	`, userId)
+	bwCiphers := make([]map[string]interface{}, 0)
+	if bwCiphersRows != nil {
+		defer bwCiphersRows.Close()
+		for bwCiphersRows.Next() {
+			var id, name, rev string
+			var folderId, notes, login, sec, card, ident, fields sql.NullString
+			var ctype, fav, reprompt int
+			if err := bwCiphersRows.Scan(&id, &folderId, &ctype, &name, &notes, &fav, &login, &sec, &card, &ident, &fields, &reprompt, &rev); err == nil {
+				bwCiphers = append(bwCiphers, map[string]interface{}{
+					"id":               id,
+					"folder_id":        folderId.String,
+					"type":             ctype,
+					"name":             name,
+					"notes":            notes.String,
+					"favorite":         fav == 1,
+					"login_data":       login.String,
+					"secure_note_data": sec.String,
+					"card_data":        card.String,
+					"identity_data":    ident.String,
+					"fields":           fields.String,
+					"reprompt":         reprompt,
+					"revision_date":    rev,
+				})
+			}
+		}
+	}
+
 	safeName := safeUsername(username)
 	now := time.Now()
 	nowISO := now.UTC().Format(time.RFC3339)
 	timestamp := now.Format("20060102_150405")
 
 	payload := map[string]interface{}{
-		"version":        2,
-		"type":           "SentinelBit_automated_encrypted_sync",
-		"created_at":     nowISO,
-		"username":       username,
-		"enc_salt":       encSalt,
-		"items_count":    len(items),
-		"passkeys_count": len(passkeys),
-		"items":          items,
-		"passkeys":       passkeys,
-		"email_aliases":  aliases,
+		"version":          3,
+		"type":             "SentinelBit_automated_encrypted_sync",
+		"created_at":       nowISO,
+		"username":         username,
+		"enc_salt":         encSalt,
+		"items_count":      len(items),
+		"passkeys_count":   len(passkeys),
+		"bw_ciphers_count": len(bwCiphers),
+		"items":            items,
+		"passkeys":         passkeys,
+		"email_aliases":    aliases,
+		"bw_folders":       bwFolders,
+		"bw_ciphers":       bwCiphers,
 	}
 
 	dataBytes, err := json.MarshalIndent(payload, "", "  ")

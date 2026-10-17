@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"sentinelbit/internal/bitwarden"
 	"sentinelbit/internal/config"
 	"sentinelbit/internal/security"
 	"sentinelbit/static"
@@ -165,6 +166,17 @@ func SetupRouter(database *sql.DB, cfg *config.Config) *chi.Mux {
 
 		// Security Audit Logs (#78)
 		api.Get("/audit/logs", RequireAuth(HandleListAuditLogs(database)))
+
+		// Bitwarden Compatible API Routes
+		bitwarden.RegisterBitwardenRoutes(api, database, cfg)
+	})
+
+	// Bitwarden Identity Endpoint (/identity/connect/token)
+	r.Mount("/identity", bitwarden.SetupIdentityRouter(database))
+
+	// Bitwarden Notifications Hub fallback
+	r.Get("/notifications/hub", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
 
 	// Prometheus root metrics endpoint

@@ -227,6 +227,22 @@ Leert den Papierkorb endgültig (Hard-Delete).
 
 ---
 
+## 🛡️ Bitwarden-Kompatibilität (`/identity` & `/api`)
+
+SentinelBit implementiert die standardmäßige Bitwarden Sync- & Authentifizierungs-API. Dadurch können offizielle Bitwarden-Clients (Browser Extensions, Mobile & Desktop Apps, CLI `bw`) direkt angebunden werden:
+
+* `GET /api/config`: Server-Konfiguration & Feature-Flags für Bitwarden-Clients.
+* `POST /api/accounts/prelogin`: KDF-Parameter (PBKDF2-SHA256, 600.000 Runden).
+* `POST /api/accounts/register`: Erstellung eines Kontos mit Bitwarden-Schlüsselbund.
+* `POST /identity/connect/token`: OAuth2 Resource Owner Password Credentials Grant mit optionaler TOTP 2FA.
+* `GET /api/accounts/profile`: Benutzerprofil & verschlüsselte Master-Keys.
+* `GET /api/sync`: Vollständige Synchronisation aller Ciphers, Folders & Domains.
+* `GET, POST, PUT, DELETE /api/ciphers`: Verwaltung von Logins, Notizen, Karten & Identitäten.
+* `GET, POST, PUT, DELETE /api/folders`: Verwaltung von Bitwarden-Ordnern.
+* `GET /notifications/hub`: WebSocket / Long-Polling Fallback.
+
+---
+
 ## 🛡️ Sicherheits-Header der API
 
 Jede Antwort enthält strikte Sicherheits-Header:

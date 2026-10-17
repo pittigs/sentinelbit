@@ -267,6 +267,45 @@ func runMigrations(db *sql.DB) error {
 		created_at TEXT NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS bw_ciphers (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		folder_id TEXT,
+		type INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		notes TEXT,
+		favorite INTEGER DEFAULT 0,
+		login_data TEXT,
+		secure_note_data TEXT,
+		card_data TEXT,
+		identity_data TEXT,
+		fields TEXT,
+		reprompt INTEGER DEFAULT 0,
+		revision_date TEXT NOT NULL,
+		deleted_date TEXT DEFAULT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS bw_folders (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		revision_date TEXT NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS bw_devices (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		device_identifier TEXT NOT NULL,
+		device_name TEXT,
+		device_type INTEGER DEFAULT 0,
+		push_token TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_vault_items_user_active ON vault_items(user_id, deleted_at, favorite);
 	CREATE INDEX IF NOT EXISTS idx_passkeys_user_active ON passkeys(user_id, deleted_at);
 	CREATE INDEX IF NOT EXISTS idx_shared_items_recipient ON shared_items(recipient_username);
@@ -276,6 +315,8 @@ func runMigrations(db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id);
 	CREATE INDEX IF NOT EXISTS idx_team_members_vault ON team_members(vault_id, user_id);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+	CREATE INDEX IF NOT EXISTS idx_bw_ciphers_user ON bw_ciphers(user_id, deleted_date);
+	CREATE INDEX IF NOT EXISTS idx_bw_folders_user ON bw_folders(user_id);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -287,6 +328,16 @@ func runMigrations(db *sql.DB) error {
 	ensureColumnExists(db, "backup_sync_settings", "gdrive_enabled", "INTEGER DEFAULT 0")
 	ensureColumnExists(db, "backup_sync_settings", "gdrive_folder_id", "TEXT DEFAULT ''")
 	ensureColumnExists(db, "backup_sync_settings", "gdrive_credentials", "TEXT DEFAULT ''")
+
+	ensureColumnExists(db, "users", "bw_key", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "bw_private_key", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "bw_public_key", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "bw_password_hash", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "bw_password_salt", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "bw_kdf", "INTEGER DEFAULT 0")
+	ensureColumnExists(db, "users", "bw_kdf_iterations", "INTEGER DEFAULT 600000")
+	ensureColumnExists(db, "users", "bw_security_stamp", "TEXT DEFAULT ''")
+	ensureColumnExists(db, "users", "updated_at", "TEXT DEFAULT ''")
 
 	_, _ = db.Exec("PRAGMA user_version = 2;")
 	return nil
